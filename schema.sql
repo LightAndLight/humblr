@@ -1,6 +1,6 @@
 CREATE TABLE users (
     id serial primary key,
-    username varchar(15),
+    username varchar(15) unique,
     email varchar(100),
     password_hash bytea,
     salt bytea

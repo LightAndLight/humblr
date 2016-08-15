@@ -20,6 +20,7 @@ import Opaleye (runQuery)
 import Servant
 import Servant.API.Experimental.Auth
 import Servant.Server.Experimental.Auth
+import Servant.Utils.StaticFiles
 import System.Entropy
 import Web.ClientSession
 
@@ -28,6 +29,11 @@ import qualified Humblr.Database as D
 humblr :: Key -> Connection -> Application
 humblr key conn = serveWithContext humblrAPI (genAuthServerContext key) (server key conn)
 
+
+newtype Token = Token { token :: Text }
+  deriving (Eq, Generic, Show)
+
+instance ToJSON Token where
 
 data User = User { _userId :: Int, _username :: Text }
   deriving (Eq, Generic, Show)
@@ -76,12 +82,13 @@ instance FromJSON CreatePost where
 
 
 type HumblrAPI = "register" :> ReqBody '[JSON] RegisterUser :> Post '[JSON] Text
-            :<|> "login" :> ReqBody '[JSON] LoginUser :> Post '[JSON] Text
+            :<|> "login" :> ReqBody '[JSON] LoginUser :> Post '[JSON] Token
             :<|> "user" :> Capture "user" Int :> "posts" :> Get '[JSON] [UserPost]
             :<|> "my" :> "posts" :> AuthProtect "cookie-auth" :> Get '[JSON] [UserPost]
             :<|> "my" :> "posts" :> AuthProtect "cookie-auth" :> "add" :> ReqBody '[JSON] CreatePost :> Post '[JSON] Text
             :<|> "users" :> Get '[JSON] [User]
             :<|> "posts" :> Get '[JSON] [UserPost]
+            :<|> Raw
 
 humblrAPI :: Proxy HumblrAPI
 humblrAPI = Proxy
@@ -103,13 +110,23 @@ type instance AuthServerData (AuthProtect "cookie-auth") = User
 genAuthServerContext :: Key -> Context (AuthHandler Request User ': '[])
 genAuthServerContext key = (authHandler key) :. EmptyContext
 
+data LoginError = UserDoesNotExist
+                | PasswordIncorrect
+
+showLoginError :: LoginError -> String
+showLoginError UserDoesNotExist = "User does not exist"
+showLoginError PasswordIncorrect = "Incorrect password"
+
+instance ToJSON LoginError where
+    toJSON e = object ["error" .= showLoginError e]
+
 server :: Key -> Connection -> Server HumblrAPI
-server key conn = register :<|> login :<|> userPosts :<|> myPosts :<|> createPost :<|> allUsers :<|> allPosts 
+server key conn = register :<|> login :<|> userPosts :<|> myPosts :<|> createPost :<|> allUsers :<|> allPosts :<|> serveDirectory "dist"
   where
     register (RegisterUser username email password) = do
         user <- liftIO $ D.selectUserByUsername conn username
         case user of
-            Just _ -> return "User already exists"
+            Just _ -> throwError $ err401 { errBody = "User already exists" }
             Nothing -> do
                 salt <- liftIO $ getEntropy 100
                 liftIO $ D.insertUser conn username email (genHash password salt) salt 
@@ -118,13 +135,13 @@ server key conn = register :<|> login :<|> userPosts :<|> myPosts :<|> createPos
     login (LoginUser username password) = do
         user <- liftIO $ D.selectUserByUsername conn username
         case user of
-            Nothing -> return "User does not exist"
+            Nothing -> throwError $ err401 { errBody = encode UserDoesNotExist }
             Just userRow -> if genHash password (D._userSalt userRow) /= D._userPasswordHash userRow
-                then return "Incorrect password"
+                then throwError $ err401 { errBody = encode PasswordIncorrect }
                 else do
-                    token <- liftIO $ encryptIO key
+                    t <- liftIO $ encryptIO key
                         (B.encode $ User (D._userId userRow) (D._userName userRow))
-                    return $ decodeUtf8 token
+                    return (Token $ decodeUtf8 t)
 
     userPosts userId = do
         rows <- liftIO $ D.selectPostsForUser conn userId 

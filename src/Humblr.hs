@@ -39,6 +39,7 @@ data User = User { _userId :: Int, _username :: Text }
   deriving (Eq, Generic, Show)
 
 instance ToJSON User where
+    toJSON (User uid uname) = object ["id" .= uid, "username" .= uname]
 
 instance Serialize User where
     put user = do
@@ -84,6 +85,7 @@ instance FromJSON CreatePost where
 type HumblrAPI = "register" :> ReqBody '[JSON] RegisterUser :> Post '[JSON] Text
             :<|> "login" :> ReqBody '[JSON] LoginUser :> Post '[JSON] Token
             :<|> "user" :> Capture "user" Int :> "posts" :> Get '[JSON] [UserPost]
+            :<|> "me" :> AuthProtect "cookie-auth" :> Get '[JSON] User
             :<|> "my" :> "posts" :> AuthProtect "cookie-auth" :> Get '[JSON] [UserPost]
             :<|> "my" :> "posts" :> AuthProtect "cookie-auth" :> "add" :> ReqBody '[JSON] CreatePost :> Post '[JSON] Text
             :<|> "users" :> Get '[JSON] [User]
@@ -121,7 +123,7 @@ instance ToJSON LoginError where
     toJSON e = object ["error" .= showLoginError e]
 
 server :: Key -> Connection -> Server HumblrAPI
-server key conn = register :<|> login :<|> userPosts :<|> myPosts :<|> createPost :<|> allUsers :<|> allPosts :<|> serveDirectory "dist"
+server key conn = register :<|> login :<|> userPosts :<|> me :<|> myPosts :<|> createPost :<|> allUsers :<|> allPosts :<|> serveDirectory "dist"
   where
     register (RegisterUser username email password) = do
         user <- liftIO $ D.selectUserByUsername conn username
@@ -146,6 +148,8 @@ server key conn = register :<|> login :<|> userPosts :<|> myPosts :<|> createPos
     userPosts userId = do
         rows <- liftIO $ D.selectPostsForUser conn userId 
         return $ map (\x -> UserPost (Just $ D._postId x) (D._postUserId x) (D._postTitle x) (D._postBody x)) rows
+
+    me user = return user
 
     myPosts user = userPosts $ _userId user
 

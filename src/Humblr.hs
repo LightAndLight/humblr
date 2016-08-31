@@ -108,7 +108,7 @@ instance FromJSON CreatePost where
 
 type HumblrAPI = "register" :> ReqBody '[JSON] RegisterUser :> S.Post '[JSON] Text
             :<|> "login" :> ReqBody '[JSON] LoginUser :> S.Post '[JSON] Token
-            :<|> "user" :> Capture "user" Int :> "posts" :> Get '[JSON] [UserPost]
+            :<|> "user" :> Capture "user" Text :> "posts" :> Get '[JSON] [UserPost]
             :<|> "me" :> AuthProtect "cookie-auth" :> Get '[JSON] UserInfo
             :<|> "my" :> "posts" :> AuthProtect "cookie-auth" :> Get '[JSON] [UserPost]
             :<|> "my" :> "posts" :> AuthProtect "cookie-auth" :> "add" :> ReqBody '[JSON] CreatePost :> S.Post '[JSON] Text
@@ -176,10 +176,14 @@ server key conn = register :<|> login :<|> userPosts :<|> me :<|> myPosts :<|> c
                         (B.encode $ userRow { _userEmail = (), _userPassword = (), _userSalt = () })
                     return (Token $ decodeUtf8 t)
 
-    userPosts :: Int -> Handler [UserPost]
-    userPosts userId = do
-        rows <- liftIO $ selectPostsForUser conn userId 
-        return $ map (\row -> row { _postUserId = () }) rows
+    userPosts :: Text -> Handler [UserPost]
+    userPosts username = do
+        maybeUser <- liftIO $ selectUserByUsername conn username
+        case maybeUser of
+            Nothing -> throwError $ err401 { errBody = encode UserDoesNotExist }
+            Just user -> do
+                rows <- liftIO $ selectPostsForUser conn (user ^. userId)
+                return $ map (\row -> row { _postUserId = () }) rows
 
     me :: DisplayUser -> Handler UserInfo
     me user = do
@@ -190,7 +194,9 @@ server key conn = register :<|> login :<|> userPosts :<|> me :<|> myPosts :<|> c
         
 
     myPosts :: DisplayUser -> Handler [UserPost]
-    myPosts user = userPosts (user ^. userId)
+    myPosts user = do
+        rows <- liftIO $ selectPostsForUser conn (user ^. userId)
+        return $ map (\row -> row { _postUserId = () }) rows
 
     createPost :: DisplayUser -> CreatePost -> Handler Text
     createPost user post = do

@@ -1,8 +1,8 @@
-{-# language OverloadedStrings, TypeOperators, TypeFamilies, DataKinds, DeriveGeneric #-}
+{-# language OverloadedStrings, TypeOperators, TypeFamilies, DataKinds, DeriveGeneric, FlexibleInstances #-}
 
 module Humblr (humblr) where
 
-import Control.Lens ((^.), _2, _3)
+import Control.Lens ((^.))
 import Control.Monad.IO.Class (liftIO)
 import Crypto.KDF.Scrypt
 import Data.Aeson
@@ -17,14 +17,15 @@ import Database.PostgreSQL.Simple (Connection)
 import GHC.Generics
 import Network.Wai (Application, Request, requestHeaders)
 import Opaleye (runQuery)
-import Servant
+import Servant hiding (Post)
+import qualified Servant as S (Post)
 import Servant.API.Experimental.Auth
 import Servant.Server.Experimental.Auth
 import Servant.Utils.StaticFiles
 import System.Entropy
 import Web.ClientSession
 
-import qualified Humblr.Database as D
+import Humblr.Database
 
 humblr :: Key -> Connection -> Application
 humblr key conn = serveWithContext humblrAPI (genAuthServerContext key) (server key conn)
@@ -35,61 +36,84 @@ newtype Token = Token { token :: Text }
 
 instance ToJSON Token where
 
-data User = User { _userId :: Int, _username :: Text }
-  deriving (Eq, Generic, Show)
+type UserInfo = User' Int Text Text () ()
+instance ToJSON UserInfo where
+    toJSON (User uid uname uemail _ _) = object [
+        "id" .= uid
+        , "username" .= uname
+        , "email" .= uemail
+        ]
 
-instance ToJSON User where
-    toJSON (User uid uname) = object ["id" .= uid, "username" .= uname]
-
-instance Serialize User where
-    put user = do
-        put $ _userId user
-        put . encodeUtf8 $ _username user 
-
-    get = User <$> get <*> (decodeUtf8 <$> get)
-
-
-data RegisterUser = RegisterUser Text Text Text deriving (Eq, Show)
-
+type RegisterUser = User' () Text Text Text ()
 instance FromJSON RegisterUser where
-    parseJSON (Object v) = RegisterUser <$>
+    parseJSON (Object v) = User () <$>
         v .: "username" <*>
         v .: "email" <*>
-        v .: "password"
+        v .: "password" <*>
+        pure ()
     parseJSON invalid = typeMismatch "RegisterUser" invalid
 
-data LoginUser = LoginUser Text Text deriving (Eq, Show)
-
+type LoginUser = User' () Text () Text ()
 instance FromJSON LoginUser where
-    parseJSON (Object v) = LoginUser <$>
+    parseJSON (Object v) = User () <$>
         v .: "username" <*>
-        v .: "password"
+        pure () <*>
+        v .: "password" <*>
+        pure ()
     parseJSON invalid = typeMismatch "LoginUser" invalid
 
+type DisplayUser = User' Int Text () () ()
+instance Serialize DisplayUser where
+    put user = do
+        put (user ^. userId)
+        put $ encodeUtf8 (user ^. userName) 
 
-data UserPost = UserPost { _postId :: Maybe Int, _ownerId :: Int, _title :: Text, _body :: Text }
-  deriving (Eq, Generic, Show)
+    get = User <$>
+        get <*>
+        (decodeUtf8 <$> get) <*>
+        pure () <*>
+        pure () <*>
+        pure ()
 
+instance ToJSON DisplayUser where
+    toJSON (User uid uname _ _ _) = object [
+        "id" .= uid
+        , "username" .= uname
+        ]
+
+type Post = Post' Int Int Text Text
+instance ToJSON Post where
+    toJSON (Post pid puid ptitle pbody) = object [
+        "id" .= pid
+        , "userId" .= puid
+        , "title" .= ptitle
+        , "body" .= pbody
+        ]
+
+type UserPost = Post' Int () Text Text
 instance ToJSON UserPost where
-instance FromJSON UserPost where
+    toJSON (Post pid _ ptitle pbody) = object [
+        "id" .= pid
+        , "title" .= ptitle
+        , "body" .= pbody
+        ]
 
-data CreatePost = CreatePost Text Text
-
+type CreatePost = Post' () () Text Text
 instance FromJSON CreatePost where
-    parseJSON (Object v) = CreatePost <$>
+    parseJSON (Object v) = Post () () <$>
         v .: "title" <*>
         v .: "body"
     parseJSON invalid = typeMismatch "CreatePost" invalid
 
 
-type HumblrAPI = "register" :> ReqBody '[JSON] RegisterUser :> Post '[JSON] Text
-            :<|> "login" :> ReqBody '[JSON] LoginUser :> Post '[JSON] Token
+type HumblrAPI = "register" :> ReqBody '[JSON] RegisterUser :> S.Post '[JSON] Text
+            :<|> "login" :> ReqBody '[JSON] LoginUser :> S.Post '[JSON] Token
             :<|> "user" :> Capture "user" Int :> "posts" :> Get '[JSON] [UserPost]
-            :<|> "me" :> AuthProtect "cookie-auth" :> Get '[JSON] User
+            :<|> "me" :> AuthProtect "cookie-auth" :> Get '[JSON] UserInfo
             :<|> "my" :> "posts" :> AuthProtect "cookie-auth" :> Get '[JSON] [UserPost]
-            :<|> "my" :> "posts" :> AuthProtect "cookie-auth" :> "add" :> ReqBody '[JSON] CreatePost :> Post '[JSON] Text
-            :<|> "users" :> Get '[JSON] [User]
-            :<|> "posts" :> Get '[JSON] [UserPost]
+            :<|> "my" :> "posts" :> AuthProtect "cookie-auth" :> "add" :> ReqBody '[JSON] CreatePost :> S.Post '[JSON] Text
+            :<|> "users" :> Get '[JSON] [DisplayUser]
+            :<|> "posts" :> Get '[JSON] [Post]
             :<|> Raw
 
 humblrAPI :: Proxy HumblrAPI
@@ -98,7 +122,7 @@ humblrAPI = Proxy
 genHash :: Text -> ByteString -> ByteString
 genHash password salt = generate (Parameters 1024 42 42 100) (encodeUtf8 password) salt
 
-authHandler :: Key -> AuthHandler Request User
+authHandler :: Key -> AuthHandler Request DisplayUser
 authHandler key = mkAuthHandler $ \req -> case lookup "auth" (requestHeaders req) of
     Nothing -> throwError $ err401 { errBody = "Missing auth header" }
     Just cookie -> case decrypt key cookie of
@@ -107,9 +131,9 @@ authHandler key = mkAuthHandler $ \req -> case lookup "auth" (requestHeaders req
             Left _ -> throwError $ err403 { errBody = "Invalid cookie" }
             Right user -> return user
 
-type instance AuthServerData (AuthProtect "cookie-auth") = User
+type instance AuthServerData (AuthProtect "cookie-auth") = DisplayUser
 
-genAuthServerContext :: Key -> Context (AuthHandler Request User ': '[])
+genAuthServerContext :: Key -> Context (AuthHandler Request DisplayUser ': '[])
 genAuthServerContext key = (authHandler key) :. EmptyContext
 
 data LoginError = UserDoesNotExist
@@ -125,42 +149,58 @@ instance ToJSON LoginError where
 server :: Key -> Connection -> Server HumblrAPI
 server key conn = register :<|> login :<|> userPosts :<|> me :<|> myPosts :<|> createPost :<|> allUsers :<|> allPosts :<|> serveDirectory "dist"
   where
-    register (RegisterUser username email password) = do
-        user <- liftIO $ D.selectUserByUsername conn username
-        case user of
+    register :: RegisterUser -> Handler Text
+    register user = do
+        let username = user ^. userName
+            email = user ^. userEmail
+            password = user ^. userPassword
+        maybeUser <- liftIO $ selectUserByUsername conn username
+        case maybeUser of
             Just _ -> throwError $ err401 { errBody = "User already exists" }
             Nothing -> do
                 salt <- liftIO $ getEntropy 100
-                liftIO $ D.insertUser conn username email (genHash password salt) salt 
+                liftIO $ insertUser conn username email (genHash password salt) salt 
                 return "User created"
 
-    login (LoginUser username password) = do
-        user <- liftIO $ D.selectUserByUsername conn username
-        case user of
+    login :: LoginUser -> Handler Token
+    login user = do
+        let username = user ^. userName
+            password = user ^. userPassword
+        maybeUser <- liftIO $ selectUserByUsername conn username
+        case maybeUser of
             Nothing -> throwError $ err401 { errBody = encode UserDoesNotExist }
-            Just userRow -> if genHash password (D._userSalt userRow) /= D._userPasswordHash userRow
+            Just userRow -> if genHash password (userRow ^. userSalt) /= userRow ^. userPassword
                 then throwError $ err401 { errBody = encode PasswordIncorrect }
                 else do
                     t <- liftIO $ encryptIO key
-                        (B.encode $ User (D._userId userRow) (D._userName userRow))
+                        (B.encode $ userRow { _userEmail = (), _userPassword = (), _userSalt = () })
                     return (Token $ decodeUtf8 t)
 
+    userPosts :: Int -> Handler [UserPost]
     userPosts userId = do
-        rows <- liftIO $ D.selectPostsForUser conn userId 
-        return $ map (\x -> UserPost (Just $ D._postId x) (D._postUserId x) (D._postTitle x) (D._postBody x)) rows
+        rows <- liftIO $ selectPostsForUser conn userId 
+        return $ map (\row -> row { _postUserId = () }) rows
 
-    me user = return user
+    me :: DisplayUser -> Handler UserInfo
+    me user = do
+        maybeUser <- liftIO $ selectUserById conn (user ^. userId)
+        case maybeUser of
+            Nothing -> throwError $ err401 { errBody = encode UserDoesNotExist }
+            Just userRow -> return userRow { _userPassword = (), _userSalt = () }
+        
 
-    myPosts user = userPosts $ _userId user
+    myPosts :: DisplayUser -> Handler [UserPost]
+    myPosts user = userPosts (user ^. userId)
 
-    createPost user (CreatePost title body) = do
-        liftIO $ D.insertPost conn (_userId user) title body
+    createPost :: DisplayUser -> CreatePost -> Handler Text
+    createPost user post = do
+        liftIO $ insertPost conn (user ^. userId) (post ^. postTitle) (post ^. postBody)
         return "post created"
 
+    allUsers :: Handler [DisplayUser]
     allUsers = do
-        rows <- liftIO $ D.selectUsers conn
-        return $ map (\x -> User (D._userId x) (D._userName x)) rows
+        rows <- liftIO $ selectUsers conn
+        return $ map (\row -> row { _userEmail = (), _userPassword = (), _userSalt = () }) rows
 
-    allPosts = do
-        rows <- liftIO $ D.selectPosts conn
-        return $ map (\x -> UserPost (Just $ D._postId x) (D._postUserId x) (D._postTitle x) (D._postBody x)) rows
+    allPosts :: Handler [Post]
+    allPosts = liftIO $ selectPosts conn

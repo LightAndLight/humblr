@@ -2,7 +2,18 @@
 
 module Humblr.Database (
     User'(..)
+    , userId
+    , userName
+    , userEmail
+    , userPassword
+    , userSalt
+
     , Post'(..)
+    , postId
+    , postUserId
+    , postTitle
+    , postBody
+
     , insertUser
     , insertPost
     , selectPosts
@@ -13,6 +24,7 @@ module Humblr.Database (
 ) where
 
 import Control.Arrow (returnA)
+import Control.Lens
 import Data.ByteString (ByteString)
 import Data.Int (Int64)
 import Data.Profunctor.Product (p2, p3, p4)
@@ -29,11 +41,14 @@ data User' a b c d e = User {
     _userId :: a
     , _userName :: b
     , _userEmail :: c
-    , _userPasswordHash :: d
+    , _userPassword :: d
     , _userSalt :: e
     }
 
 type User = User' Int Text Text ByteString ByteString
+
+makeLenses ''User'
+
 
 type UserColumnR =
     User' (Column PGInt4) (Column PGText) (Column PGText) (Column PGBytea) (Column PGBytea)
@@ -55,6 +70,9 @@ data Post' a b c d = Post {
 
 type Post = Post' Int Int Text Text
 
+makeLenses ''Post'
+
+
 type PostColumnR = Post' (Column PGInt4) (Column PGInt4) (Column PGText) (Column PGText)
 
 type PostColumnW = Post' (Maybe (Column PGInt4)) (Column PGInt4) (Column PGText) (Column PGText)
@@ -67,7 +85,7 @@ userTable = Table "users" $ pUser User {
     _userId = optional "id"
     , _userName = required "username"
     , _userEmail = required "email"
-    , _userPasswordHash = required "password_hash"
+    , _userPassword = required "password_hash"
     , _userSalt = required "salt"
     }
 
@@ -78,15 +96,15 @@ selectUsers :: Connection -> IO [User]
 selectUsers conn = runQuery conn userQuery
 
 selectUserById :: Connection -> Int -> IO (Maybe User)
-selectUserById conn userId = fmap headMay $ runQuery conn $ proc () -> do
+selectUserById conn uid = fmap headMay $ runQuery conn $ proc () -> do
     userRow <- userQuery -< ()
-    restrict -< _userId userRow .== pgInt4 userId
+    restrict -< userRow ^. userId .== pgInt4 uid
     returnA -< userRow
 
 selectUserByUsername :: Connection -> Text -> IO (Maybe User)
-selectUserByUsername conn username = fmap headMay $ runQuery conn $ proc () -> do
+selectUserByUsername conn uname = fmap headMay $ runQuery conn $ proc () -> do
     userRow <- userQuery -< ()
-    restrict -< _userName userRow .== pgStrictText username
+    restrict -< userRow ^. userName .== pgStrictText uname
     returnA -< userRow
 
 postTable :: Table PostColumnW PostColumnR
@@ -104,18 +122,18 @@ selectPosts :: Connection -> IO [Post]
 selectPosts conn = runQuery conn postQuery
 
 postsForUserQuery :: Int -> Query PostColumnR
-postsForUserQuery userId' = proc () -> do
+postsForUserQuery uid = proc () -> do
     postRow <- postQuery -< ()
-    restrict -< pgInt4 userId' .== _postUserId postRow
+    restrict -< pgInt4 uid .== postRow ^. postUserId
     returnA -< postRow
 
 selectPostsForUser :: Connection -> Int -> IO [Post]
-selectPostsForUser conn userId' = runQuery conn $ postsForUserQuery userId'
+selectPostsForUser conn uid = runQuery conn $ postsForUserQuery uid
 
 insertPost :: Connection -> Int -> Text -> Text -> IO Int
-insertPost conn userId' title body = fmap head $ runInsertReturning conn postTable newPost _postId
+insertPost conn uid title body = fmap head $ runInsertReturning conn postTable newPost _postId
   where
-    newPost = Post Nothing (pgInt4 userId') (pgStrictText title) (pgStrictText body)
+    newPost = Post Nothing (pgInt4 uid) (pgStrictText title) (pgStrictText body)
 
 insertUser :: Connection -> Text -> Text -> ByteString -> ByteString -> IO Int
 insertUser conn username email passwordHash salt = fmap head $

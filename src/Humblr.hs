@@ -9,6 +9,7 @@ import Data.Aeson
 import Data.Aeson.Types (typeMismatch)
 import Data.ByteString (ByteString)
 import Data.ByteString.Char8 (pack)
+import Data.Maybe (fromJust)
 import Data.Serialize (Serialize, get, put)
 import qualified Data.Serialize as B
 import Data.Text (Text)
@@ -81,19 +82,11 @@ instance ToJSON DisplayUser where
         , "username" .= uname
         ]
 
-type Post = Post' Int Int Text Text
+type Post = Post' Int Text Text Text
 instance ToJSON Post where
-    toJSON (Post pid puid ptitle pbody) = object [
+    toJSON (Post pid puser ptitle pbody) = object [
         "id" .= pid
-        , "userId" .= puid
-        , "title" .= ptitle
-        , "body" .= pbody
-        ]
-
-type UserPost = Post' Int () Text Text
-instance ToJSON UserPost where
-    toJSON (Post pid _ ptitle pbody) = object [
-        "id" .= pid
+        , "author" .= puser
         , "title" .= ptitle
         , "body" .= pbody
         ]
@@ -108,9 +101,9 @@ instance FromJSON CreatePost where
 
 type HumblrAPI = "register" :> ReqBody '[JSON] RegisterUser :> S.Post '[JSON] Text
             :<|> "login" :> ReqBody '[JSON] LoginUser :> S.Post '[JSON] Token
-            :<|> "user" :> Capture "user" Text :> "posts" :> Get '[JSON] [UserPost]
+            :<|> "user" :> Capture "user" Text :> "posts" :> Get '[JSON] [Post]
             :<|> "me" :> AuthProtect "cookie-auth" :> Get '[JSON] UserInfo
-            :<|> "my" :> "posts" :> AuthProtect "cookie-auth" :> Get '[JSON] [UserPost]
+            :<|> "my" :> "posts" :> AuthProtect "cookie-auth" :> Get '[JSON] [Post]
             :<|> "my" :> "posts" :> AuthProtect "cookie-auth" :> "add" :> ReqBody '[JSON] CreatePost :> S.Post '[JSON] Text
             :<|> "users" :> Get '[JSON] [DisplayUser]
             :<|> "posts" :> Get '[JSON] [Post]
@@ -176,14 +169,14 @@ server key conn = register :<|> login :<|> userPosts :<|> me :<|> myPosts :<|> c
                         (B.encode $ userRow { _userEmail = (), _userPassword = (), _userSalt = () })
                     return (Token $ decodeUtf8 t)
 
-    userPosts :: Text -> Handler [UserPost]
+    userPosts :: Text -> Handler [Post]
     userPosts username = do
         maybeUser <- liftIO $ selectUserByUsername conn username
         case maybeUser of
             Nothing -> throwError $ err401 { errBody = encode UserDoesNotExist }
             Just user -> do
                 rows <- liftIO $ selectPostsForUser conn (user ^. userId)
-                return $ map (\row -> row { _postUserId = () }) rows
+                return $ map (\row -> row { _postUserId = username }) rows
 
     me :: DisplayUser -> Handler UserInfo
     me user = do
@@ -193,10 +186,10 @@ server key conn = register :<|> login :<|> userPosts :<|> me :<|> myPosts :<|> c
             Just userRow -> return userRow { _userPassword = (), _userSalt = () }
         
 
-    myPosts :: DisplayUser -> Handler [UserPost]
+    myPosts :: DisplayUser -> Handler [Post]
     myPosts user = do
         rows <- liftIO $ selectPostsForUser conn (user ^. userId)
-        return $ map (\row -> row { _postUserId = () }) rows
+        return $ map (\row -> row { _postUserId = user ^. userName }) rows
 
     createPost :: DisplayUser -> CreatePost -> Handler Text
     createPost user post = do
@@ -209,4 +202,6 @@ server key conn = register :<|> login :<|> userPosts :<|> me :<|> myPosts :<|> c
         return $ map (\row -> row { _userEmail = (), _userPassword = (), _userSalt = () }) rows
 
     allPosts :: Handler [Post]
-    allPosts = liftIO $ selectPosts conn
+    allPosts = do
+        res <- liftIO $ selectPostsWithAuthors conn
+        return $ map (\(post,user) -> post { _postUserId = fromJust (user ^. userName) }) res

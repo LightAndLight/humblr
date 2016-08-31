@@ -18,6 +18,7 @@ module Humblr.Database (
     , insertPost
     , selectPosts
     , selectPostsForUser
+    , selectPostsWithAuthors
     , selectUsers
     , selectUserById
     , selectUserByUsername
@@ -120,6 +121,28 @@ postQuery = queryTable postTable
 
 selectPosts :: Connection -> IO [Post]
 selectPosts conn = runQuery conn postQuery
+
+type NullableUserColumn = User'
+    (Column (Nullable PGInt4))
+    (Column (Nullable PGText))
+    (Column (Nullable PGText))
+    (Column (Nullable PGBytea))
+    (Column (Nullable PGBytea))
+
+type NullableUser = User'
+    (Maybe Int)
+    (Maybe Text)
+    (Maybe Text)
+    (Maybe ByteString)
+    (Maybe ByteString)
+
+postsWithAuthorsQuery :: Query (PostColumnR,NullableUserColumn)
+postsWithAuthorsQuery = leftJoin postQuery userQuery eqUserId
+  where
+    eqUserId (postRow,userRow) = postRow ^. postUserId .== userRow ^. userId
+
+selectPostsWithAuthors :: Connection -> IO [(Post,NullableUser)]
+selectPostsWithAuthors conn = runQuery conn postsWithAuthorsQuery
 
 postsForUserQuery :: Int -> Query PostColumnR
 postsForUserQuery uid = proc () -> do

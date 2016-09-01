@@ -25,6 +25,9 @@ module Humblr.Database (
     , selectUsers
     , selectUserById
     , selectUserByUsername
+
+    , updatePost
+    , deletePost 
 ) where
 
 import Control.Arrow (returnA)
@@ -169,6 +172,25 @@ insertPost :: Connection -> Int -> Text -> Text -> IO Int
 insertPost conn uid title body = fmap head $ runInsertReturning conn postTable newPost _postId
   where
     newPost = Post Nothing (pgInt4 uid) (pgStrictText title) (pgStrictText body)
+
+updatePost :: Connection -> Int -> Text -> Text -> IO ()
+updatePost conn pid title body = do
+    runUpdate conn postTable updateFunc pred
+    return ()
+  where
+    updateFunc p = p {
+        _postId = Just (p ^. postId)
+        , _postTitle = pgStrictText title
+        , _postBody = pgStrictText body
+        }
+    pred p = p ^. postId .== pgInt4 pid
+
+deletePost :: Connection -> Int -> IO ()
+deletePost conn pid = do
+    runDelete conn postTable pred
+    return ()
+  where
+    pred p = p ^. postId .== pgInt4 pid
 
 insertUser :: Connection -> Text -> Text -> ByteString -> ByteString -> IO Int
 insertUser conn username email passwordHash salt = fmap head $

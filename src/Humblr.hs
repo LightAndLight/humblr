@@ -91,6 +91,13 @@ instance ToJSON Post where
         , "body" .= pbody
         ]
 
+instance FromJSON Post where
+    parseJSON (Object v) = Post <$>
+        v .: "id" <*>
+        v .: "author" <*>
+        v .: "title" <*>
+        v .: "body"
+
 type CreatePost = Post' () () Text Text
 instance FromJSON CreatePost where
     parseJSON (Object v) = Post () () <$>
@@ -98,16 +105,21 @@ instance FromJSON CreatePost where
         v .: "body"
     parseJSON invalid = typeMismatch "CreatePost" invalid
 
+type MyPostsAPI = Get '[JSON] [Post]
+            :<|> "add" :> ReqBody '[JSON] CreatePost :> S.Post '[JSON] Text
+
+type PostAPI = Get '[JSON] Post
+          :<|> "delete" :> AuthProtect "cookie-auth" :> Delete '[JSON] Text
+          :<|> "update" :> AuthProtect "cookie-auth" :> ReqBody '[JSON] CreatePost :> Patch '[JSON] Text
 
 type HumblrAPI = "register" :> ReqBody '[JSON] RegisterUser :> S.Post '[JSON] Text
             :<|> "login" :> ReqBody '[JSON] LoginUser :> S.Post '[JSON] Token
             :<|> "user" :> Capture "user" Text :> "posts" :> Get '[JSON] [Post]
             :<|> "me" :> AuthProtect "cookie-auth" :> Get '[JSON] UserInfo
-            :<|> "my" :> "posts" :> AuthProtect "cookie-auth" :> Get '[JSON] [Post]
-            :<|> "my" :> "posts" :> AuthProtect "cookie-auth" :> "add" :> ReqBody '[JSON] CreatePost :> S.Post '[JSON] Text
+            :<|> "my" :> "posts" :> AuthProtect "cookie-auth" :> MyPostsAPI
             :<|> "users" :> Get '[JSON] [DisplayUser]
             :<|> "posts" :> Get '[JSON] [Post]
-            :<|> "post" :> Capture "postId" Int :> Get '[JSON] Post
+            :<|> "post" :> Capture "postId" Int :> PostAPI
             :<|> Raw
 
 humblrAPI :: Proxy HumblrAPI
@@ -140,8 +152,53 @@ showLoginError PasswordIncorrect = "Incorrect password"
 instance ToJSON LoginError where
     toJSON e = object ["error" .= showLoginError e]
 
+myPostsServer :: Key -> Connection -> DisplayUser -> Server MyPostsAPI
+myPostsServer key conn user = myPosts :<|> createPost
+  where
+    myPosts :: Handler [Post]
+    myPosts = do
+        rows <- liftIO $ selectPostsForUser conn (user ^. userId)
+        return $ map (\row -> row { _postUserId = user ^. userName }) rows
+
+    createPost :: CreatePost -> Handler Text
+    createPost post = do
+        liftIO $ insertPost conn (user ^. userId) (post ^. postTitle) (post ^. postBody)
+        return "post created"
+
+postServer :: Key -> Connection -> Int -> Server PostAPI
+postServer key conn pid = postWithId :<|> deletePostEndpoint :<|> updatePostEndpoint
+  where
+    postWithId :: Handler Post
+    postWithId = do
+        maybePost <- liftIO $ selectPostWithId conn pid 
+        case maybePost of
+            Nothing -> throwError $ err401 { errBody = "Post does not exist" }
+            Just (post,user) -> return post { _postUserId = fromJust (user ^. userName) }
+
+    deletePostEndpoint :: DisplayUser -> Handler Text
+    deletePostEndpoint user = do
+        maybePost <- liftIO $ selectPostWithId conn pid
+        case maybePost of
+            Nothing -> throwError $ err401 { errBody = "Post does not exist" }
+            Just (_,user')
+              | user ^. userId == fromJust (user' ^. userId) -> do
+                liftIO $ deletePost conn pid
+                return "Post deleted"
+              | otherwise -> throwError $ err401 { errBody = "You don't own that post" }
+
+    updatePostEndpoint :: DisplayUser -> CreatePost -> Handler Text
+    updatePostEndpoint user post = do
+        maybePost <- liftIO $ selectPostWithId conn pid
+        case maybePost of
+            Nothing -> throwError $ err401 { errBody = "Post does not exist" }
+            Just (_,user')
+              | user ^. userId == fromJust (user' ^. userId) -> do
+                liftIO $ updatePost conn pid (post ^. postTitle) (post ^. postBody)
+                return "Post updated"
+              | otherwise -> throwError $ err401 { errBody = "You don't own that post" }
+
 server :: Key -> Connection -> Server HumblrAPI
-server key conn = register :<|> login :<|> userPosts :<|> me :<|> myPosts :<|> createPost :<|> allUsers :<|> allPosts :<|> postWithId :<|> serveDirectory "dist"
+server key conn = register :<|> login :<|> userPosts :<|> me :<|> myPostsServer key conn :<|> allUsers :<|> allPosts :<|> postServer key conn :<|> serveDirectory "dist"
   where
     register :: RegisterUser -> Handler Text
     register user = do
@@ -187,16 +244,6 @@ server key conn = register :<|> login :<|> userPosts :<|> me :<|> myPosts :<|> c
             Just userRow -> return userRow { _userPassword = (), _userSalt = () }
         
 
-    myPosts :: DisplayUser -> Handler [Post]
-    myPosts user = do
-        rows <- liftIO $ selectPostsForUser conn (user ^. userId)
-        return $ map (\row -> row { _postUserId = user ^. userName }) rows
-
-    createPost :: DisplayUser -> CreatePost -> Handler Text
-    createPost user post = do
-        liftIO $ insertPost conn (user ^. userId) (post ^. postTitle) (post ^. postBody)
-        return "post created"
-
     allUsers :: Handler [DisplayUser]
     allUsers = do
         rows <- liftIO $ selectUsers conn
@@ -207,10 +254,4 @@ server key conn = register :<|> login :<|> userPosts :<|> me :<|> myPosts :<|> c
         res <- liftIO $ selectPostsWithAuthors conn
         return $ map (\(post,user) -> post { _postUserId = fromJust (user ^. userName) }) res
 
-    postWithId :: Int -> Handler Post
-    postWithId pid = do
-        maybePost <- liftIO $ selectPostWithId conn pid 
-        case maybePost of
-            Nothing -> throwError $ err401 { errBody = "Post does not exist" }
-            Just (post,user) -> return post { _postUserId = fromJust (user ^. userName) }
 

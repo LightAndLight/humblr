@@ -142,12 +142,14 @@ type NullableUser = User'
     (Maybe ByteString)
     (Maybe ByteString)
 
-postsWithAuthorsQuery :: Query (PostColumnR,NullableUserColumn)
-postsWithAuthorsQuery = leftJoin postQuery userQuery eqUserId
-  where
-    eqUserId (postRow,userRow) = postRow ^. postUserId .== userRow ^. userId
+postsWithAuthorsQuery :: Query (PostColumnR,Column PGText)
+postsWithAuthorsQuery = proc () -> do
+    userRow <- userQuery -< ()
+    postRow <- postQuery -< ()
+    restrict -< userRow ^. userId .== postRow ^. postUserId
+    returnA -< (postRow,userRow ^. userName)
 
-selectPostsWithAuthors :: Connection -> IO [(Post,NullableUser)]
+selectPostsWithAuthors :: Connection -> IO [(Post,Text)]
 selectPostsWithAuthors conn = runQuery conn postsWithAuthorsQuery
 
 postsForUserQuery :: Int -> Query PostColumnR
@@ -159,13 +161,13 @@ postsForUserQuery uid = proc () -> do
 selectPostsForUser :: Connection -> Int -> IO [Post]
 selectPostsForUser conn uid = runQuery conn $ postsForUserQuery uid
 
-postWithIdQuery :: Int -> Query (PostColumnR,NullableUserColumn)
+postWithIdQuery :: Int -> Query (PostColumnR,Column PGText)
 postWithIdQuery pid = proc () -> do
-    (postRow,userRow) <- postsWithAuthorsQuery -< ()
+    (postRow,username) <- postsWithAuthorsQuery -< ()
     restrict -< pgInt4 pid .== postRow ^. postId
-    returnA -< (postRow,userRow)
+    returnA -< (postRow,username)
 
-selectPostWithId :: Connection -> Int -> IO (Maybe (Post,NullableUser))
+selectPostWithId :: Connection -> Int -> IO (Maybe (Post,Text))
 selectPostWithId conn pid = headMay <$> runQuery conn (postWithIdQuery pid)
 
 insertPost :: Connection -> Int -> Text -> Text -> IO Int

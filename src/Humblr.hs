@@ -173,15 +173,15 @@ postServer key conn pid = postWithId :<|> deletePostEndpoint :<|> updatePostEndp
         maybePost <- liftIO $ selectPostWithId conn pid 
         case maybePost of
             Nothing -> throwError $ err401 { errBody = "Post does not exist" }
-            Just (post,user) -> return post { _postUserId = fromJust (user ^. userName) }
+            Just (post,username) -> return post { _postUserId = username }
 
     deletePostEndpoint :: DisplayUser -> Handler Text
     deletePostEndpoint user = do
         maybePost <- liftIO $ selectPostWithId conn pid
         case maybePost of
             Nothing -> throwError $ err401 { errBody = "Post does not exist" }
-            Just (_,user')
-              | user ^. userId == fromJust (user' ^. userId) -> do
+            Just (post,username)
+              | user ^. userId == post ^. postUserId -> do
                 liftIO $ deletePost conn pid
                 return "Post deleted"
               | otherwise -> throwError $ err401 { errBody = "You don't own that post" }
@@ -191,8 +191,8 @@ postServer key conn pid = postWithId :<|> deletePostEndpoint :<|> updatePostEndp
         maybePost <- liftIO $ selectPostWithId conn pid
         case maybePost of
             Nothing -> throwError $ err401 { errBody = "Post does not exist" }
-            Just (_,user')
-              | user ^. userId == fromJust (user' ^. userId) -> do
+            Just (post',username)
+              | user ^. userId == post' ^. postUserId -> do
                 liftIO $ updatePost conn pid (post ^. postTitle) (post ^. postBody)
                 return "Post updated"
               | otherwise -> throwError $ err401 { errBody = "You don't own that post" }
@@ -252,6 +252,6 @@ server key conn = register :<|> login :<|> userPosts :<|> me :<|> myPostsServer 
     allPosts :: Handler [Post]
     allPosts = do
         res <- liftIO $ selectPostsWithAuthors conn
-        return $ map (\(post,user) -> post { _postUserId = fromJust (user ^. userName) }) res
+        return $ map (\(post,username) -> post { _postUserId = username }) res
 
 

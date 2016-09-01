@@ -16,9 +16,12 @@ module Humblr.Database (
 
     , insertUser
     , insertPost
+
     , selectPosts
     , selectPostsForUser
     , selectPostsWithAuthors
+    , selectPostWithId
+
     , selectUsers
     , selectUserById
     , selectUserByUsername
@@ -152,6 +155,15 @@ postsForUserQuery uid = proc () -> do
 
 selectPostsForUser :: Connection -> Int -> IO [Post]
 selectPostsForUser conn uid = runQuery conn $ postsForUserQuery uid
+
+postWithIdQuery :: Int -> Query (PostColumnR,NullableUserColumn)
+postWithIdQuery pid = proc () -> do
+    (postRow,userRow) <- postsWithAuthorsQuery -< ()
+    restrict -< pgInt4 pid .== postRow ^. postId
+    returnA -< (postRow,userRow)
+
+selectPostWithId :: Connection -> Int -> IO (Maybe (Post,NullableUser))
+selectPostWithId conn pid = headMay <$> runQuery conn (postWithIdQuery pid)
 
 insertPost :: Connection -> Int -> Text -> Text -> IO Int
 insertPost conn uid title body = fmap head $ runInsertReturning conn postTable newPost _postId

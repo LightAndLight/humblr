@@ -107,6 +107,7 @@ type HumblrAPI = "register" :> ReqBody '[JSON] RegisterUser :> S.Post '[JSON] Te
             :<|> "my" :> "posts" :> AuthProtect "cookie-auth" :> "add" :> ReqBody '[JSON] CreatePost :> S.Post '[JSON] Text
             :<|> "users" :> Get '[JSON] [DisplayUser]
             :<|> "posts" :> Get '[JSON] [Post]
+            :<|> "post" :> Capture "postId" Int :> Get '[JSON] Post
             :<|> Raw
 
 humblrAPI :: Proxy HumblrAPI
@@ -140,7 +141,7 @@ instance ToJSON LoginError where
     toJSON e = object ["error" .= showLoginError e]
 
 server :: Key -> Connection -> Server HumblrAPI
-server key conn = register :<|> login :<|> userPosts :<|> me :<|> myPosts :<|> createPost :<|> allUsers :<|> allPosts :<|> serveDirectory "dist"
+server key conn = register :<|> login :<|> userPosts :<|> me :<|> myPosts :<|> createPost :<|> allUsers :<|> allPosts :<|> postWithId :<|> serveDirectory "dist"
   where
     register :: RegisterUser -> Handler Text
     register user = do
@@ -205,3 +206,11 @@ server key conn = register :<|> login :<|> userPosts :<|> me :<|> myPosts :<|> c
     allPosts = do
         res <- liftIO $ selectPostsWithAuthors conn
         return $ map (\(post,user) -> post { _postUserId = fromJust (user ^. userName) }) res
+
+    postWithId :: Int -> Handler Post
+    postWithId pid = do
+        maybePost <- liftIO $ selectPostWithId conn pid 
+        case maybePost of
+            Nothing -> throwError $ err401 { errBody = "Post does not exist" }
+            Just (post,user) -> return post { _postUserId = fromJust (user ^. userName) }
+

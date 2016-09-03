@@ -126,7 +126,7 @@ humblrAPI :: Proxy HumblrAPI
 humblrAPI = Proxy
 
 genHash :: Text -> ByteString -> ByteString
-genHash password salt = generate (Parameters 1024 42 42 100) (encodeUtf8 password) salt
+genHash password = generate (Parameters 1024 42 42 100) (encodeUtf8 password)
 
 authHandler :: Key -> AuthHandler Request DisplayUser
 authHandler key = mkAuthHandler $ \req -> case lookup "auth" (requestHeaders req) of

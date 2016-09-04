@@ -1,4 +1,4 @@
-{-# language OverloadedStrings -}
+{-# language OverloadedStrings #-}
 {-# language TypeOperators #-}
 {-# language TypeFamilies #-}
 {-# language DataKinds #-}
@@ -115,7 +115,8 @@ type MyPostsAPI = Get '[JSON] [Post]
 
 type PostAPI = Get '[JSON] Post
           :<|> "delete" :> AuthProtect "cookie-auth" :> Delete '[JSON] Text
-          :<|> "update" :> AuthProtect "cookie-auth" :> ReqBody '[JSON] CreatePost :> Patch '[JSON] Text
+          :<|> "update" :> AuthProtect "cookie-auth"
+               :> ReqBody '[JSON] CreatePost :> Patch '[JSON] Text
 
 type HumblrAPI = "register" :> ReqBody '[JSON] RegisterUser :> S.Post '[JSON] Text
             :<|> "login" :> ReqBody '[JSON] LoginUser :> S.Post '[JSON] Token
@@ -124,7 +125,7 @@ type HumblrAPI = "register" :> ReqBody '[JSON] RegisterUser :> S.Post '[JSON] Te
             :<|> "my" :> "posts" :> AuthProtect "cookie-auth" :> MyPostsAPI
             :<|> "users" :> Get '[JSON] [DisplayUser]
             :<|> "posts" :> Get '[JSON] [Post]
-            :<|> "post" :> Capture "postId" Int :> PostAPI
+            :<|> "posts" :> Capture "postId" Int :> PostAPI
             :<|> Raw
 
 humblrAPI :: Proxy HumblrAPI
@@ -145,7 +146,7 @@ authHandler key = mkAuthHandler $ \req -> case lookup "auth" (requestHeaders req
 type instance AuthServerData (AuthProtect "cookie-auth") = DisplayUser
 
 genAuthServerContext :: Key -> Context (AuthHandler Request DisplayUser ': '[])
-genAuthServerContext key = (authHandler key) :. EmptyContext
+genAuthServerContext key = authHandler key :. EmptyContext
 
 data LoginError = UserDoesNotExist
                 | PasswordIncorrect

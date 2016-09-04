@@ -1,4 +1,9 @@
-{-# language OverloadedStrings, TypeOperators, TypeFamilies, DataKinds, DeriveGeneric, FlexibleInstances #-}
+{-# language OverloadedStrings -}
+{-# language TypeOperators #-}
+{-# language TypeFamilies #-}
+{-# language DataKinds #-}
+{-# language DeriveGeneric #-}
+{-# language FlexibleInstances #-}
 
 module Humblr (humblr) where
 

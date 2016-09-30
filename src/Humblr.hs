@@ -7,7 +7,7 @@
 
 module Humblr (humblr) where
 
-import Control.Lens ((^.))
+import Control.Lens ((&), over, mapped, (.~), (^.), set)
 import Control.Monad.IO.Class (liftIO)
 import Crypto.KDF.Scrypt
 import Data.Aeson
@@ -164,7 +164,7 @@ myPostsServer key conn user = myPosts :<|> createPost
     myPosts :: Handler [Post]
     myPosts = do
         rows <- liftIO $ selectPostsForUser conn (user ^. userId)
-        return $ map (\row -> row { _postUserId = user ^. userName }) rows
+        return $ fmap (postUserId .~ user ^. userName) rows
 
     createPost :: CreatePost -> Handler Text
     createPost post = do
@@ -179,7 +179,7 @@ postServer key conn pid = postWithId :<|> deletePostEndpoint :<|> updatePostEndp
         maybePost <- liftIO $ selectPostWithId conn pid 
         case maybePost of
             Nothing -> throwError $ err401 { errBody = "Post does not exist" }
-            Just (post,username) -> return post { _postUserId = username }
+            Just (post,username) -> return (post & postUserId .~ username)
 
     deletePostEndpoint :: DisplayUser -> Handler Text
     deletePostEndpoint user = do
@@ -204,7 +204,16 @@ postServer key conn pid = postWithId :<|> deletePostEndpoint :<|> updatePostEndp
               | otherwise -> throwError $ err401 { errBody = "You don't own that post" }
 
 server :: Key -> Connection -> Server HumblrAPI
-server key conn = register :<|> login :<|> userPosts :<|> me :<|> myPostsServer key conn :<|> allUsers :<|> allPosts :<|> postServer key conn :<|> serveDirectory "dist"
+server key conn
+  = register :<|>
+    login :<|>
+    userPosts :<|>
+    me :<|>
+    myPostsServer key conn :<|>
+    allUsers :<|>
+    allPosts :<|>
+    postServer key conn :<|>
+    serveDirectory "dist"
   where
     register :: RegisterUser -> Handler Text
     register user = do
@@ -229,8 +238,9 @@ server key conn = register :<|> login :<|> userPosts :<|> me :<|> myPostsServer 
             Just userRow -> if genHash password (userRow ^. userSalt) /= userRow ^. userPassword
                 then throwError $ err401 { errBody = encode PasswordIncorrect }
                 else do
-                    t <- liftIO $ encryptIO key
-                        (B.encode $ userRow { _userEmail = (), _userPassword = (), _userSalt = () })
+                    t <- liftIO . encryptIO key $
+                        B.encode
+                            (userRow & set userEmail () . set userPassword () . set userSalt ())
                     return (Token $ decodeUtf8 t)
 
     userPosts :: Text -> Handler [Post]
@@ -240,24 +250,24 @@ server key conn = register :<|> login :<|> userPosts :<|> me :<|> myPostsServer 
             Nothing -> throwError $ err401 { errBody = encode UserDoesNotExist }
             Just user -> do
                 rows <- liftIO $ selectPostsForUser conn (user ^. userId)
-                return $ map (\row -> row { _postUserId = username }) rows
+                return $ fmap (postUserId .~ username) rows
 
     me :: DisplayUser -> Handler UserInfo
     me user = do
         maybeUser <- liftIO $ selectUserById conn (user ^. userId)
         case maybeUser of
             Nothing -> throwError $ err401 { errBody = encode UserDoesNotExist }
-            Just userRow -> return userRow { _userPassword = (), _userSalt = () }
+            Just userRow -> return (userRow & set userPassword () . set userSalt ())
         
 
     allUsers :: Handler [DisplayUser]
     allUsers = do
         rows <- liftIO $ selectUsers conn
-        return $ map (\row -> row { _userEmail = (), _userPassword = (), _userSalt = () }) rows
+        return $ fmap (set userEmail () . set userPassword () . set userSalt ()) rows
 
     allPosts :: Handler [Post]
     allPosts = do
         res <- liftIO $ selectPostsWithAuthors conn
-        return $ map (\(post,username) -> post { _postUserId = username }) res
+        return $ fmap (\(post,username) -> post & postUserId .~ username ) res
 
 

@@ -113,12 +113,12 @@ instance FromJSON CreatePost where
 
 type MyPostsAPI
   = Get '[JSON] [Post] :<|>
-    "add" :> ReqBody '[JSON] CreatePost :> S.Post '[JSON] Text
+    ReqBody '[JSON] CreatePost :> S.Post '[JSON] Text
 
 type PostAPI
   = Get '[JSON] Post :<|>
-    "delete" :> AuthProtect "cookie-auth" :> Delete '[JSON] Text :<|>
-    "update" :> AuthProtect "cookie-auth" :> ReqBody '[JSON] CreatePost :> Patch '[JSON] Text
+    AuthProtect "cookie-auth" :> Delete '[JSON] Text :<|>
+    AuthProtect "cookie-auth" :> ReqBody '[JSON] CreatePost :> Patch '[JSON] Text
 
 type HumblrAPI
   = "register" :> ReqBody '[JSON] RegisterUser :> S.Post '[JSON] Text :<|>

@@ -1,1 +1,1 @@
-pg_ctl -D ~/.pgsql/data -l logfile start
+pg_ctl -D .pgsql/data -l logfile start

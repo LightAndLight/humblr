@@ -1,107 +1,105 @@
-{-# language OverloadedStrings #-}
-{-# language TypeOperators #-}
-{-# language TypeFamilies #-}
-{-# language DataKinds #-}
-{-# language DeriveGeneric #-}
-{-# language FlexibleInstances #-}
+{-# LANGUAGE ConstraintKinds         #-}
+{-# LANGUAGE DataKinds         #-}
+{-# LANGUAGE DeriveGeneric     #-}
+{-# LANGUAGE FlexibleInstances #-}
+{-# LANGUAGE OverloadedLabels #-}
+{-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE TypeFamilies      #-}
+{-# LANGUAGE TypeOperators     #-}
 
 module Humblr (humblr) where
 
-import Control.Lens ((&), over, mapped, (.~), (^.), set)
-import Control.Monad.IO.Class (liftIO)
-import Crypto.KDF.Scrypt
-import Data.Aeson
-import Data.Aeson.Types (typeMismatch)
-import Data.ByteString (ByteString)
-import Data.ByteString.Char8 (pack)
-import Data.Maybe (fromJust)
-import Data.Serialize (Serialize, get, put)
-import qualified Data.Serialize as B
-import Data.Text (Text)
-import Data.Text.Encoding (decodeUtf8, encodeUtf8)
-import Database.PostgreSQL.Simple (Connection)
-import GHC.Generics
-import Network.Wai (Application, Request, requestHeaders)
-import Opaleye (runQuery)
-import Servant hiding (Post)
-import qualified Servant as S (Post)
-import Servant.API.Experimental.Auth
-import Servant.Server.Experimental.Auth
-import Servant.Utils.StaticFiles
-import System.Entropy
-import Web.ClientSession
+import Bookkeeper ((:=>), Book, emptyBook)
+import           Control.Lens                     (mapped, over, set, (&), (.~),
+                                                   (^.))
+import           Control.Monad.IO.Class           (liftIO)
+import           Crypto.KDF.Scrypt
+import           Data.Aeson
+import           Data.Aeson.Types                 (typeMismatch)
+import           Data.ByteString                  (ByteString)
+import           Data.ByteString.Char8            (pack)
+import           Data.Maybe                       (fromJust)
+import           Data.Serialize                   (Serialize, get, put)
+import qualified Data.Serialize                   as B
+import           Data.Text                        (Text)
+import           Data.Text.Encoding               (decodeUtf8, encodeUtf8)
+import           Database.PostgreSQL.Simple       (Connection)
+import           GHC.Generics
+import           Network.Wai                      (Application, Request,
+                                                   requestHeaders)
+import           Opaleye                          (runQuery)
+import           Servant                          hiding (Post)
+import qualified Servant                          as S (Post)
+import           Servant.API.Experimental.Auth
+import           Servant.Server.Experimental.Auth
+import           Servant.Utils.StaticFiles
+import           System.Entropy
+import           Web.ClientSession
 
-import Humblr.Database
+import           Humblr.Database
 
 humblr :: Key -> Connection -> Application
 humblr key conn = serveWithContext humblrAPI (genAuthServerContext key) (server key conn)
-
 
 newtype Token = Token { token :: Text }
   deriving (Eq, Generic, Show)
 
 instance ToJSON Token where
 
-type UserInfo = User' Int Text Text () ()
+type UserInfo = Book '["id" :=> Int, "username" :=> Text, "email" :=> Text]
 instance ToJSON UserInfo where
-    toJSON (User uid uname uemail _ _) = object [
-        "id" .= uid
-        , "username" .= uname
-        , "email" .= uemail
+    toJSON rec = object [
+        "id" .= (rec ?: #id)
+        , "username" .= (rec ?: #username)
+        , "email" .= (rec ?: #email)
         ]
 
-type RegisterUser = User' () Text Text Text ()
+type RegisterUser = Book '["username" :=> Text, "email" :=> Text, "password" :=> Text]
 instance FromJSON RegisterUser where
-    parseJSON (Object v) = User () <$>
-        v .: "username" <*>
-        v .: "email" <*>
-        v .: "password" <*>
-        pure ()
+    parseJSON (Object v)
+      = (set #userName <$> v .: "username") <*>
+        ((set #email <$> v .: "email") <*>
+        ((flip (set #password) emptyBook <$> v .: "password")))
     parseJSON invalid = typeMismatch "RegisterUser" invalid
 
-type LoginUser = User' () Text () Text ()
+type LoginUser = Book '["username" :=> Text, "password" :=> Text]
 instance FromJSON LoginUser where
-    parseJSON (Object v) = User () <$>
-        v .: "username" <*>
-        pure () <*>
-        v .: "password" <*>
-        pure ()
+    parseJSON (Object v)
+      = (set #userName <$> v .: "username") <*>
+        (flip (set #password) emptyBook <$> v .: "password")
     parseJSON invalid = typeMismatch "LoginUser" invalid
 
-type DisplayUser = User' Int Text () () ()
+type DisplayUser = Book '["id" :=> Int, "username" :=> Text]
 instance Serialize DisplayUser where
     put user = do
-        put (user ^. userId)
-        put $ encodeUtf8 (user ^. userName) 
+        put (user ?: #id)
+        put $ encodeUtf8 (user ?: #username)
 
-    get = User <$>
-        get <*>
-        (decodeUtf8 <$> get) <*>
-        pure () <*>
-        pure () <*>
-        pure ()
+    get
+      = (set #id <$> get) <*>
+      (flip (set #username) emptyBook . decodeUtf8 <$> get)
 
 instance ToJSON DisplayUser where
-    toJSON (User uid uname _ _ _) = object [
-        "id" .= uid
-        , "username" .= uname
+    toJSON rec = object [
+        "id" .= (rec ?: #id)
+        , "username" .= (rec ?: #username)
         ]
 
-type Post = Post' Int Text Text Text
+type Post = Book '["id" :=> Int, "author" :=> Text, "title" :=> Text, "body" :=> Text]
 instance ToJSON Post where
-    toJSON (Post pid puser ptitle pbody) = object [
-        "id" .= pid
-        , "author" .= puser
-        , "title" .= ptitle
-        , "body" .= pbody
+    toJSON rec = object [
+        "id" .= (rec ?: #id)
+        , "author" .= (rec ?: #author)
+        , "title" .= (rec ?: #title)
+        , "body" .= (rec ?: #body)
         ]
 
 instance FromJSON Post where
-    parseJSON (Object v) = Post <$>
-        v .: "id" <*>
-        v .: "author" <*>
-        v .: "title" <*>
-        v .: "body"
+    parseJSON (Object v)
+      = (set #id <$> v .: "id") <*>
+        ((set #author <$> v .: "author") <*>
+        ((set #title <$> v .: "title") <*>
+        ((flip (set #body) emptyBook <$> v .: "body"))))
 
 type CreatePost = Post' () () Text Text
 instance FromJSON CreatePost where
@@ -176,7 +174,7 @@ postServer key conn pid = postWithId :<|> deletePostEndpoint :<|> updatePostEndp
   where
     postWithId :: Handler Post
     postWithId = do
-        maybePost <- liftIO $ selectPostWithId conn pid 
+        maybePost <- liftIO $ selectPostWithId conn pid
         case maybePost of
             Nothing -> throwError $ err401 { errBody = "Post does not exist" }
             Just (post,username) -> return (post & postUserId .~ username)
@@ -225,7 +223,7 @@ server key conn
             Just _ -> throwError $ err401 { errBody = "User already exists" }
             Nothing -> do
                 salt <- liftIO $ getEntropy 100
-                liftIO $ insertUser conn username email (genHash password salt) salt 
+                liftIO $ insertUser conn username email (genHash password salt) salt
                 return "User created"
 
     login :: LoginUser -> Handler Token
@@ -258,7 +256,7 @@ server key conn
         case maybeUser of
             Nothing -> throwError $ err401 { errBody = encode UserDoesNotExist }
             Just userRow -> return (userRow & set userPassword () . set userSalt ())
-        
+
 
     allUsers :: Handler [DisplayUser]
     allUsers = do
@@ -269,5 +267,3 @@ server key conn
     allPosts = do
         res <- liftIO $ selectPostsWithAuthors conn
         return $ fmap (\(post,username) -> post & postUserId .~ username ) res
-
-

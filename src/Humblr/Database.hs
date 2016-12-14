@@ -1,18 +1,15 @@
-{-# language Arrows, FlexibleInstances, MultiParamTypeClasses, TemplateHaskell #-}
+{-# LANGUAGE Arrows                #-}
+{-# LANGUAGE DataKinds                #-}
+{-# LANGUAGE FlexibleInstances     #-}
+{-# LANGUAGE MultiParamTypeClasses #-}
+{-# LANGUAGE OverloadedLabels      #-}
+{-# LANGUAGE TemplateHaskell       #-}
+{-# LANGUAGE TypeOperators       #-}
 
 module Humblr.Database (
     User'(..)
-    , userId
-    , userName
-    , userEmail
-    , userPassword
-    , userSalt
 
     , Post'(..)
-    , postId
-    , postUserId
-    , postTitle
-    , postBody
 
     , insertUser
     , insertPost
@@ -27,35 +24,37 @@ module Humblr.Database (
     , selectUserByUsername
 
     , updatePost
-    , deletePost 
+    , deletePost
 ) where
 
-import Control.Arrow (returnA)
-import Control.Lens
-import Data.ByteString (ByteString)
-import Data.Int (Int64)
-import Data.Profunctor.Product (p2, p3, p4)
-import Data.Profunctor.Product.TH (makeAdaptorAndInstance)
-import Data.Text (Text)
-import Database.PostgreSQL.Simple (Connection)
-import Opaleye
-import Safe (headMay)
+import           Bookkeeper
+import           Control.Arrow              (returnA)
+import           Data.ByteString            (ByteString)
+import           Data.Int                   (Int64)
+import Data.Profunctor
+import           Data.Profunctor.Product
+import           Data.Profunctor.Product.Default
+import           Data.Profunctor.Product.TH (makeAdaptorAndInstance)
+import           Data.Text                  (Text)
+import           Database.PostgreSQL.Simple (Connection)
+import           Opaleye
+import           Safe                       (headMay)
 
 
 -- users
 -- id | username | email | password_hash | salt
-data User' a b c d e = User {
-    _userId :: a
-    , _userName :: b
-    , _userEmail :: c
-    , _userPassword :: d
-    , _userSalt :: e
+newtype User' a b c d e
+  = User' {
+    getUser :: Book
+      '[ "id" :=> a
+       , "username" :=> b
+       , "email" :=> c
+       , "password" :=> d
+       , "salt" :=> e
+       ]
     }
 
 type User = User' Int Text Text ByteString ByteString
-
-makeLenses ''User'
-
 
 type UserColumnR =
     User' (Column PGInt4) (Column PGText) (Column PGText) (Column PGBytea) (Column PGBytea)
@@ -63,38 +62,91 @@ type UserColumnR =
 type UserColumnW =
     User' (Maybe (Column PGInt4)) (Column PGText) (Column PGText) (Column PGBytea) (Column PGBytea)
 
-$(makeAdaptorAndInstance "pUser" ''User')
+{-
+pUserApplicative :: Applicative f => User' (f a) (f b) (f c) (f d) (f e) -> f (User' a b c d e)
+pUserApplicative (User' f)
+  = User' <$>
+    ((set #id <$> get #id f) <*>
+    ((set #username <$> get #username f) <*>
+    ((set #email <$> get #email f) <*>
+    ((set #password <$> get #password f) <*>
+    (flip (set #salt) f <$> get #salt f)))))
+-}
 
+pUser :: ProductProfunctor p
+     => User' (p a a') (p b b') (p c c') (p d d') (p e e')
+     -> p (User' a b c d e) (User' a' b' c' d' e')
+pUser (User' f)
+  = User' ***$
+    (lmap (get #id . getUser) (set #id ***$ get #id f) ****
+    (lmap (get #username . getUser) (set #username ***$ get #username f) ****
+    (lmap (get #email . getUser) (set #email ***$ get #email f) ****
+    (lmap (get #password . getUser) (set #password ***$ get #password f) ****
+    (lmap (get #salt . getUser) $ flip (set #salt) f ***$ get #salt f)))))
+
+instance
+  ( ProductProfunctor p
+  , Default p a a'
+  , Default p b b'
+  , Default p c c'
+  , Default p d d'
+  , Default p e e'
+  ) => Default p (User' a b c d e) (User' a' b' c' d' e') where
+  def = pUser . User' $ emptyBook
+    & #id =: def
+    & #username =: def
+    & #email =: def
+    & #password =: def
+    & #salt =: def
 
 -- posts
 -- id | user_id | title | body
-data Post' a b c d = Post {
-    _postId :: a
-    , _postUserId :: b
-    , _postTitle :: c
-    , _postBody :: d
+newtype Post' a b c d
+  = Post' {
+    getPost :: Book
+      '[ "id" :=> a
+       , "userId" :=> b
+       , "title" :=> c
+       , "body" :=> d
+       ]
     }
 
 type Post = Post' Int Int Text Text
-
-makeLenses ''Post'
-
 
 type PostColumnR = Post' (Column PGInt4) (Column PGInt4) (Column PGText) (Column PGText)
 
 type PostColumnW = Post' (Maybe (Column PGInt4)) (Column PGInt4) (Column PGText) (Column PGText)
 
-$(makeAdaptorAndInstance "pPost" ''Post')
+pPost :: ProductProfunctor p
+     => Post' (p a a') (p b b') (p c c') (p d d')
+     -> p (Post' a b c d) (Post' a' b' c' d')
+pPost (Post' f)
+  = Post' ***$
+    (lmap (get #id . getPost) (set #id ***$ get #id f) ****
+    (lmap (get #userId . getPost) (set #userId ***$ get #userId f) ****
+    (lmap (get #title . getPost) (set #title ***$ get #title f) ****
+    (lmap (get #body . getPost) $ flip (set #body) f ***$ get #body f))))
 
+instance
+  ( ProductProfunctor p
+  , Default p a a'
+  , Default p b b'
+  , Default p c c'
+  , Default p d d'
+  ) => Default p (Post' a b c d) (Post' a' b' c' d') where
+  def = pPost . Post' $ emptyBook
+    & #id =: def
+    & #userId =: def
+    & #title =: def
+    & #body =: def
 
 userTable :: Table UserColumnW UserColumnR
-userTable = Table "users" $ pUser User {
-    _userId = optional "id"
-    , _userName = required "username"
-    , _userEmail = required "email"
-    , _userPassword = required "password_hash"
-    , _userSalt = required "salt"
-    }
+userTable = Table "users" . pUser . User' $ emptyBook
+  & #id =: optional "id"
+  & #username =: required "username"
+  & #email =: required "email"
+  & #password =: required "password_hash"
+  & #salt =: required "salt"
 
 userQuery :: Query UserColumnR
 userQuery = queryTable userTable
@@ -104,23 +156,22 @@ selectUsers conn = runQuery conn userQuery
 
 selectUserById :: Connection -> Int -> IO (Maybe User)
 selectUserById conn uid = fmap headMay $ runQuery conn $ proc () -> do
-    userRow <- userQuery -< ()
-    restrict -< userRow ^. userId .== pgInt4 uid
-    returnA -< userRow
+    (User' userRow) <- userQuery -< ()
+    restrict -< get #id userRow .== pgInt4 uid
+    returnA -< (User' userRow)
 
 selectUserByUsername :: Connection -> Text -> IO (Maybe User)
 selectUserByUsername conn uname = fmap headMay $ runQuery conn $ proc () -> do
-    userRow <- userQuery -< ()
-    restrict -< userRow ^. userName .== pgStrictText uname
-    returnA -< userRow
+    (User' userRow) <- userQuery -< ()
+    restrict -< get #username userRow .== pgStrictText uname
+    returnA -< (User' userRow)
 
 postTable :: Table PostColumnW PostColumnR
-postTable = Table "posts" $ pPost Post {
-    _postId = optional "id"
-    , _postUserId = required "user_id"
-    , _postTitle = required "title"
-    , _postBody = required "body"
-    }
+postTable = Table "posts" . pPost . Post' $ emptyBook
+    & #id =: optional "id"
+    & #userId =: required "user_id"
+    & #title =: required "title"
+    & #body =: required "body"
 
 postQuery :: Query PostColumnR
 postQuery = queryTable postTable
@@ -144,62 +195,71 @@ type NullableUser = User'
 
 postsWithAuthorsQuery :: Query (PostColumnR,Column PGText)
 postsWithAuthorsQuery = proc () -> do
-    userRow <- userQuery -< ()
-    postRow <- postQuery -< ()
-    restrict -< userRow ^. userId .== postRow ^. postUserId
-    returnA -< (postRow,userRow ^. userName)
+    (User' userRow) <- userQuery -< ()
+    (Post' postRow) <- postQuery -< ()
+    restrict -< get #id userRow .== get #userId postRow
+    returnA -< (Post' postRow,get #username userRow)
 
 selectPostsWithAuthors :: Connection -> IO [(Post,Text)]
 selectPostsWithAuthors conn = runQuery conn postsWithAuthorsQuery
 
 postsForUserQuery :: Int -> Query PostColumnR
 postsForUserQuery uid = proc () -> do
-    postRow <- postQuery -< ()
-    restrict -< pgInt4 uid .== postRow ^. postUserId
-    returnA -< postRow
+    (Post' postRow) <- postQuery -< ()
+    restrict -< pgInt4 uid .== get #userId postRow
+    returnA -< (Post' postRow)
 
 selectPostsForUser :: Connection -> Int -> IO [Post]
 selectPostsForUser conn uid = runQuery conn $ postsForUserQuery uid
 
-postWithIdQuery :: Int -> Query (PostColumnR,Column PGText)
+postWithIdQuery :: Int -> Query (Column PGText, PostColumnR)
 postWithIdQuery pid = proc () -> do
-    (postRow,username) <- postsWithAuthorsQuery -< ()
-    restrict -< pgInt4 pid .== postRow ^. postId
-    returnA -< (postRow,username)
+    (Post' postRow,username) <- postsWithAuthorsQuery -< ()
+    restrict -< pgInt4 pid .== get #id postRow
+    returnA -< (username, Post' postRow)
 
-selectPostWithId :: Connection -> Int -> IO (Maybe (Post,Text))
-selectPostWithId conn pid = headMay <$> runQuery conn (postWithIdQuery pid)
+selectPostWithId
+  :: Connection
+  -> Int
+  -> IO (Maybe (Book '["id" :=> Int, "userId" :=> Int, "title" :=> Text, "body" :=> Text, "username" :=> Text]))
+selectPostWithId conn pid = do
+  res <- runQuery conn (postWithIdQuery pid)
+  return $ lmap (fmap getPost) (uncurry (set #username)) <$> headMay res
 
 insertPost :: Connection -> Int -> Text -> Text -> IO Int
-insertPost conn uid title body = fmap head $ runInsertReturning conn postTable newPost _postId
+insertPost conn uid title body = fmap head $ runInsertReturning conn postTable newPost (get #id . getPost)
   where
-    newPost = Post Nothing (pgInt4 uid) (pgStrictText title) (pgStrictText body)
+    newPost = Post' $ emptyBook
+      & #id =: Nothing
+      & #userId =: pgInt4 uid
+      & #title =: pgStrictText title
+      & #body =: pgStrictText body
 
 updatePost :: Connection -> Int -> Text -> Text -> IO ()
 updatePost conn pid title body = do
     runUpdate conn postTable updateFunc pred
     return ()
   where
-    updateFunc p = p {
-        _postId = Just (p ^. postId)
-        , _postTitle = pgStrictText title
-        , _postBody = pgStrictText body
-        }
-    pred p = p ^. postId .== pgInt4 pid
+    updateFunc (Post' p) = Post' $ p
+      & #id %: Just
+      & #title =: pgStrictText title
+      & #body =: pgStrictText body
+    pred (Post' p) = get #id p .== pgInt4 pid
 
 deletePost :: Connection -> Int -> IO ()
 deletePost conn pid = do
     runDelete conn postTable pred
     return ()
   where
-    pred p = p ^. postId .== pgInt4 pid
+    pred (Post' p) = get #id p .== pgInt4 pid
 
 insertUser :: Connection -> Text -> Text -> ByteString -> ByteString -> IO Int
 insertUser conn username email passwordHash salt = fmap head $
-    runInsertReturning conn userTable newUser _userId
+    runInsertReturning conn userTable newUser (get #id . getUser)
   where
-    newUser = User Nothing
-        (pgStrictText username)
-        (pgStrictText email)
-        (pgStrictByteString passwordHash)
-        (pgStrictByteString salt)
+    newUser = User' $ emptyBook
+      & #id =: Nothing
+      & #username =: pgStrictText username
+      & #email =: pgStrictText email
+      & #password =: pgStrictByteString passwordHash
+      & #salt =: pgStrictByteString salt

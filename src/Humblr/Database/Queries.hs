@@ -1,23 +1,7 @@
-{-# LANGUAGE Arrows                #-}
-{-# LANGUAGE FlexibleInstances     #-}
-{-# LANGUAGE MultiParamTypeClasses #-}
-{-# LANGUAGE TemplateHaskell       #-}
+{-# LANGUAGE Arrows #-}
 
-module Humblr.Database (
-  User'(..)
-  , userId
-  , userName
-  , userEmail
-  , userPassword
-  , userSalt
-
-  , Post'(..)
-  , postId
-  , postUserId
-  , postTitle
-  , postBody
-
-  , insertUser
+module Humblr.Database.Queries
+  ( insertUser
   , insertPost
 
   , selectPosts
@@ -31,91 +15,22 @@ module Humblr.Database (
 
   , updatePost
   , deletePost
-) where
+  ) where
 
 import           Control.Arrow              (returnA)
 import           Control.Lens
 import           Data.ByteString            (ByteString)
 import           Data.Int                   (Int64)
 import           Data.Profunctor.Product    (p2, p3, p4)
-import           Data.Profunctor.Product.TH (makeAdaptorAndInstance)
 import           Data.Text                  (Text)
 import           Database.PostgreSQL.Simple (Connection)
 import           Opaleye
 import           Safe                       (headMay)
 
--- users
--- id | username | email | password_hash | salt
-data User' a b c d e
-  = User
-    { _userId       :: a
-    , _userName     :: b
-    , _userEmail    :: c
-    , _userPassword :: d
-    , _userSalt     :: e
-    }
+import           Humblr.Database.Models
 
 type User = User' Int Text Text ByteString ByteString
-
-makeLenses ''User'
-
-type UserColumnR
-  = User'
-    (Column PGInt4)
-    (Column PGText)
-    (Column PGText)
-    (Column PGBytea)
-    (Column PGBytea)
-
-type UserColumnW
-  = User'
-    (Maybe (Column PGInt4))
-    (Column PGText)
-    (Column PGText)
-    (Column PGBytea)
-    (Column PGBytea)
-
-$(makeAdaptorAndInstance "pUser" ''User')
-
--- posts
--- id | user_id | title | body
-data Post' a b c d
-  = Post
-    { _postId     :: a
-    , _postUserId :: b
-    , _postTitle  :: c
-    , _postBody   :: d
-    }
-
 type Post = Post' Int Int Text Text
-
-makeLenses ''Post'
-
-type PostColumnR
-  = Post'
-    (Column PGInt4)
-    (Column PGInt4)
-    (Column PGText)
-    (Column PGText)
-
-type PostColumnW
-  = Post'
-    (Maybe (Column PGInt4))
-    (Column PGInt4)
-    (Column PGText)
-    (Column PGText)
-
-$(makeAdaptorAndInstance "pPost" ''Post')
-
-userTable :: Table UserColumnW UserColumnR
-userTable = Table "users" $
-  pUser User
-    { _userId = optional "id"
-    , _userName = required "username"
-    , _userEmail = required "email"
-    , _userPassword = required "password_hash"
-    , _userSalt = required "salt"
-    }
 
 userQuery :: Query UserColumnR
 userQuery = queryTable userTable
@@ -135,36 +50,11 @@ selectUserByUsername conn uname = fmap headMay $ runQuery conn $ proc () -> do
   restrict -< userRow ^. userName .== pgStrictText uname
   returnA -< userRow
 
-postTable :: Table PostColumnW PostColumnR
-postTable = Table "posts" $
-  pPost Post
-    { _postId = optional "id"
-    , _postUserId = required "user_id"
-    , _postTitle = required "title"
-    , _postBody = required "body"
-    }
-
 postQuery :: Query PostColumnR
 postQuery = queryTable postTable
 
 selectPosts :: Connection -> IO [Post]
 selectPosts conn = runQuery conn postQuery
-
-type NullableUserColumn
-  = User'
-    (Column (Nullable PGInt4))
-    (Column (Nullable PGText))
-    (Column (Nullable PGText))
-    (Column (Nullable PGBytea))
-    (Column (Nullable PGBytea))
-
-type NullableUser
-  = User'
-    (Maybe Int)
-    (Maybe Text)
-    (Maybe Text)
-    (Maybe ByteString)
-    (Maybe ByteString)
 
 postsWithAuthorsQuery :: Query (PostColumnR,Column PGText)
 postsWithAuthorsQuery = proc () -> do

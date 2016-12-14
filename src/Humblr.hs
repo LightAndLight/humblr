@@ -33,7 +33,8 @@ import           Servant.Utils.StaticFiles
 import           System.Entropy
 import           Web.ClientSession
 
-import           Humblr.Database
+import           Humblr.Database.Models
+import           Humblr.Database.Queries
 
 humblr :: Key -> Connection -> Application
 humblr key conn = serveWithContext humblrAPI (genAuthServerContext key) (server key conn)

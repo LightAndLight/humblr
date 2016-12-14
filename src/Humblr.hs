@@ -9,12 +9,15 @@ module Humblr (humblr) where
 
 import           Control.Lens                     (mapped, over, set, (&), (.~),
                                                    (^.))
+import           Control.Monad.Except
 import           Control.Monad.IO.Class           (liftIO)
 import           Crypto.KDF.Scrypt
 import           Data.Aeson
+import           Data.Aeson.Encode.Pretty         (encodePretty)
 import           Data.Aeson.Types                 (typeMismatch)
 import           Data.ByteString                  (ByteString)
 import           Data.ByteString.Char8            (pack)
+import qualified Data.Map                         as M
 import           Data.Maybe                       (fromJust)
 import           Data.Serialize                   (Serialize, get, put)
 import qualified Data.Serialize                   as B
@@ -39,6 +42,22 @@ import           Humblr.Database.Queries
 humblr :: Key -> Connection -> Application
 humblr key conn = serveWithContext humblrAPI (genAuthServerContext key) (server key conn)
 
+data RequestStatus e s
+  = RequestSuccess s
+  | RequestError [e]
+
+data APIError e = APIError ServantErr (M.Map Text e)
+type APIHandler e = ExceptT (APIError e) IO
+apiHandlerToHandler :: ToJSON e => APIHandler e :~> Handler
+apiHandlerToHandler = Nat (withExceptT errConvert)
+  where
+    errConvert (APIError err vals)
+      = err { errBody = encodePretty $ object ["error" .= toJSON vals] }
+
+instance (ToJSON e, ToJSON s) => ToJSON (RequestStatus e s) where
+  toJSON (RequestSuccess s) = object [ "success" .= toJSON s ]
+  toJSON (RequestError e) = object [ "error" .= toJSON e ]
+
 newtype Token = Token { token :: Text }
   deriving (Eq, Generic, Show)
 
@@ -52,6 +71,14 @@ instance ToJSON UserInfo where
       , "username" .= (user ^. userName)
       , "email" .= (user ^. userEmail)
       ]
+
+data RegistrationError
+  = EmailExists
+  | UsernameExists
+
+instance ToJSON RegistrationError where
+  toJSON EmailExists = toJSON ("That email is already taken" :: Text)
+  toJSON UsernameExists = toJSON ("That username is already taken" :: Text)
 
 type RegisterUser = User' () Text Text Text ()
 instance FromJSON RegisterUser where
@@ -121,7 +148,7 @@ type PostAPI
     AuthProtect "cookie-auth" :> ReqBody '[JSON] CreatePost :> Patch '[JSON] Text
 
 type HumblrAPI
-  = "register" :> ReqBody '[JSON] RegisterUser :> S.Post '[JSON] Text :<|>
+  = "register" :> ReqBody '[JSON] RegisterUser :> S.Post '[JSON] () :<|>
     "login" :> ReqBody '[JSON] LoginUser :> S.Post '[JSON] Token :<|>
     "user" :> Capture "user" Text :> "posts" :> Get '[JSON] [Post] :<|>
     "me" :> AuthProtect "cookie-auth" :> Get '[JSON] UserInfo :<|>
@@ -210,7 +237,7 @@ postServer key conn pid = postWithId :<|> deletePostEndpoint :<|> updatePostEndp
 
 server :: Key -> Connection -> Server HumblrAPI
 server key conn
-  = register :<|>
+  = enter apiHandlerToHandler register :<|>
     login :<|>
     userPosts :<|>
     me :<|>
@@ -220,7 +247,7 @@ server key conn
     postServer key conn :<|>
     serveDirectory "dist"
   where
-    register :: RegisterUser -> Handler Text
+    register :: RegisterUser -> APIHandler RegistrationError ()
     register user
       = let username = user ^. userName
             email = user ^. userEmail
@@ -228,11 +255,11 @@ server key conn
         in do
           maybeUser <- liftIO $ selectUserByUsername conn username
           case maybeUser of
-            Just _ -> throwError $ err401 { errBody = "User already exists" }
+            Just _ -> throwError . APIError err409 $ M.fromList [("username",UsernameExists)]
             Nothing -> do
               salt <- liftIO $ getEntropy 100
               liftIO $ insertUser conn username email (genHash password salt) salt
-              return "User created"
+              return ()
 
     login :: LoginUser -> Handler Token
     login user

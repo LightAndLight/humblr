@@ -20,12 +20,15 @@ library
                      , Humblr.Database.Queries
   build-depends:       base >= 4.7 && < 5
                      , aeson
+                     , aeson-pretty
                      , bytestring
                      , cereal
                      , clientsession
+                     , containers
                      , cryptonite
                      , entropy
                      , lens
+                     , mtl
                      , opaleye
                      , postgresql-simple
                      , product-profunctors

@@ -1,37 +1,39 @@
-{-# language OverloadedStrings #-}
-{-# language TypeOperators #-}
-{-# language TypeFamilies #-}
-{-# language DataKinds #-}
-{-# language DeriveGeneric #-}
-{-# language FlexibleInstances #-}
+{-# LANGUAGE DataKinds         #-}
+{-# LANGUAGE DeriveGeneric     #-}
+{-# LANGUAGE FlexibleInstances #-}
+{-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE TypeFamilies      #-}
+{-# LANGUAGE TypeOperators     #-}
 
 module Humblr (humblr) where
 
-import Control.Lens ((&), over, mapped, (.~), (^.), set)
-import Control.Monad.IO.Class (liftIO)
-import Crypto.KDF.Scrypt
-import Data.Aeson
-import Data.Aeson.Types (typeMismatch)
-import Data.ByteString (ByteString)
-import Data.ByteString.Char8 (pack)
-import Data.Maybe (fromJust)
-import Data.Serialize (Serialize, get, put)
-import qualified Data.Serialize as B
-import Data.Text (Text)
-import Data.Text.Encoding (decodeUtf8, encodeUtf8)
-import Database.PostgreSQL.Simple (Connection)
-import GHC.Generics
-import Network.Wai (Application, Request, requestHeaders)
-import Opaleye (runQuery)
-import Servant hiding (Post)
-import qualified Servant as S (Post)
-import Servant.API.Experimental.Auth
-import Servant.Server.Experimental.Auth
-import Servant.Utils.StaticFiles
-import System.Entropy
-import Web.ClientSession
+import           Control.Lens                     (mapped, over, set, (&), (.~),
+                                                   (^.))
+import           Control.Monad.IO.Class           (liftIO)
+import           Crypto.KDF.Scrypt
+import           Data.Aeson
+import           Data.Aeson.Types                 (typeMismatch)
+import           Data.ByteString                  (ByteString)
+import           Data.ByteString.Char8            (pack)
+import           Data.Maybe                       (fromJust)
+import           Data.Serialize                   (Serialize, get, put)
+import qualified Data.Serialize                   as B
+import           Data.Text                        (Text)
+import           Data.Text.Encoding               (decodeUtf8, encodeUtf8)
+import           Database.PostgreSQL.Simple       (Connection)
+import           GHC.Generics
+import           Network.Wai                      (Application, Request,
+                                                   requestHeaders)
+import           Opaleye                          (runQuery)
+import           Servant                          hiding (Post)
+import qualified Servant                          as S (Post)
+import           Servant.API.Experimental.Auth
+import           Servant.Server.Experimental.Auth
+import           Servant.Utils.StaticFiles
+import           System.Entropy
+import           Web.ClientSession
 
-import Humblr.Database
+import           Humblr.Database
 
 humblr :: Key -> Connection -> Application
 humblr key conn = serveWithContext humblrAPI (genAuthServerContext key) (server key conn)
@@ -44,10 +46,10 @@ instance ToJSON Token where
 
 type UserInfo = User' Int Text Text () ()
 instance ToJSON UserInfo where
-    toJSON (User uid uname uemail _ _) = object [
-        "id" .= uid
-        , "username" .= uname
-        , "email" .= uemail
+    toJSON user = object [
+        "id" .= (user ^. userId)
+        , "username" .= (user ^. userName)
+        , "email" .= (user ^. userEmail)
         ]
 
 type RegisterUser = User' () Text Text Text ()
@@ -72,7 +74,7 @@ type DisplayUser = User' Int Text () () ()
 instance Serialize DisplayUser where
     put user = do
         put (user ^. userId)
-        put $ encodeUtf8 (user ^. userName) 
+        put $ encodeUtf8 (user ^. userName)
 
     get = User <$>
         get <*>
@@ -82,18 +84,18 @@ instance Serialize DisplayUser where
         pure ()
 
 instance ToJSON DisplayUser where
-    toJSON (User uid uname _ _ _) = object [
-        "id" .= uid
-        , "username" .= uname
+    toJSON user = object [
+        "id" .= (user ^. userId)
+        , "username" .= (user ^. userName)
         ]
 
 type Post = Post' Int Text Text Text
 instance ToJSON Post where
-    toJSON (Post pid puser ptitle pbody) = object [
-        "id" .= pid
-        , "author" .= puser
-        , "title" .= ptitle
-        , "body" .= pbody
+    toJSON post = object [
+        "id" .= (post ^. postId)
+        , "author" .= (post ^. postUserId)
+        , "title" .= (post ^. postTitle)
+        , "body" .= (post ^. postBody)
         ]
 
 instance FromJSON Post where
@@ -176,7 +178,7 @@ postServer key conn pid = postWithId :<|> deletePostEndpoint :<|> updatePostEndp
   where
     postWithId :: Handler Post
     postWithId = do
-        maybePost <- liftIO $ selectPostWithId conn pid 
+        maybePost <- liftIO $ selectPostWithId conn pid
         case maybePost of
             Nothing -> throwError $ err401 { errBody = "Post does not exist" }
             Just (post,username) -> return (post & postUserId .~ username)
@@ -225,7 +227,7 @@ server key conn
             Just _ -> throwError $ err401 { errBody = "User already exists" }
             Nothing -> do
                 salt <- liftIO $ getEntropy 100
-                liftIO $ insertUser conn username email (genHash password salt) salt 
+                liftIO $ insertUser conn username email (genHash password salt) salt
                 return "User created"
 
     login :: LoginUser -> Handler Token
@@ -258,7 +260,7 @@ server key conn
         case maybeUser of
             Nothing -> throwError $ err401 { errBody = encode UserDoesNotExist }
             Just userRow -> return (userRow & set userPassword () . set userSalt ())
-        
+
 
     allUsers :: Handler [DisplayUser]
     allUsers = do
@@ -269,5 +271,3 @@ server key conn
     allPosts = do
         res <- liftIO $ selectPostsWithAuthors conn
         return $ fmap (\(post,username) -> post & postUserId .~ username ) res
-
-

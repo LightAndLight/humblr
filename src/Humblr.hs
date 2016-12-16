@@ -296,9 +296,9 @@ server key conn
               else do
                 t <- liftIO . encryptIO key $
                   B.encode (userRow &
-                    set userEmail () .
-                    set userPassword () .
-                    set userSalt ())
+                    userEmail .~ () &
+                    userPassword .~ () &
+                    userSalt .~ ())
                 return (Token $ decodeUtf8 t)
 
     userPosts :: Text -> Handler [Post]
@@ -315,7 +315,7 @@ server key conn
       maybeUser <- liftIO $ selectUserById conn (user ^. userId)
       case maybeUser of
         Nothing -> throwError $ err401 { errBody = encode UserDoesNotExist }
-        Just userRow -> return (userRow & set userPassword () . set userSalt ())
+        Just userRow -> return (userRow & userPassword .~ () & userSalt .~ ())
 
     allUsers :: Handler [DisplayUser]
     allUsers = do

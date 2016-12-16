@@ -174,7 +174,7 @@ humblrAPI :: Proxy HumblrAPI
 humblrAPI = Proxy
 
 genHash :: Text -> ByteString -> ByteString
-genHash password = generate (Parameters 1024 42 42 100) (encodeUtf8 password)
+genHash password = generate (Parameters (2^14) 8 1 100) (encodeUtf8 password)
 
 authHandler :: Key -> AuthHandler Request DisplayUser
 authHandler key

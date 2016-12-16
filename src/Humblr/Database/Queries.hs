@@ -9,6 +9,9 @@ module Humblr.Database.Queries
   , selectPostsWithAuthors
   , selectPostWithId
 
+  , usernameExists
+  , emailExists
+
   , selectUsers
   , selectUserById
   , selectUserByUsername
@@ -24,7 +27,7 @@ import           Data.Int                   (Int64)
 import           Data.Profunctor.Product    (p2, p3, p4)
 import           Data.Text                  (Text)
 import           Database.PostgreSQL.Simple (Connection)
-import           Opaleye
+import           Opaleye                    hiding (not, null)
 import           Safe                       (headMay)
 
 import           Humblr.Database.Models
@@ -45,9 +48,27 @@ selectUserById conn uid = fmap headMay $ runQuery conn $ proc () -> do
   returnA -< userRow
 
 selectUserByUsername :: Connection -> Text -> IO (Maybe User)
-selectUserByUsername conn uname = fmap headMay $ runQuery conn $ proc () -> do
+selectUserByUsername conn = fmap headMay . selectUserByUsernameQuery conn
+
+usernameExists :: Connection -> Text -> IO Bool
+usernameExists conn = fmap (not . null) . selectUserByUsernameQuery conn
+
+selectUserByUsernameQuery :: Connection -> Text -> IO [User]
+selectUserByUsernameQuery conn uname = runQuery conn $ proc () -> do
   userRow <- userQuery -< ()
   restrict -< userRow ^. userName .== pgStrictText uname
+  returnA -< userRow
+
+selectUserByEmail :: Connection -> Text -> IO (Maybe User)
+selectUserByEmail conn = fmap headMay . selectUserByUsernameQuery conn
+
+emailExists :: Connection -> Text -> IO Bool
+emailExists conn = fmap (not . null) . selectUserByEmailQuery conn
+
+selectUserByEmailQuery :: Connection -> Text -> IO [User]
+selectUserByEmailQuery conn uemail = runQuery conn $ proc () -> do
+  userRow <- userQuery -< ()
+  restrict -< userRow ^. userEmail .== pgStrictText uemail
   returnA -< userRow
 
 postQuery :: Query PostColumnR

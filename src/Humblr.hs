@@ -1,9 +1,10 @@
-{-# LANGUAGE DataKinds         #-}
-{-# LANGUAGE DeriveGeneric     #-}
-{-# LANGUAGE FlexibleInstances #-}
-{-# LANGUAGE OverloadedStrings #-}
-{-# LANGUAGE TypeFamilies      #-}
-{-# LANGUAGE TypeOperators     #-}
+{-# LANGUAGE DataKinds                  #-}
+{-# LANGUAGE DeriveGeneric              #-}
+{-# LANGUAGE FlexibleInstances          #-}
+{-# LANGUAGE GeneralizedNewtypeDeriving #-}
+{-# LANGUAGE OverloadedStrings          #-}
+{-# LANGUAGE TypeFamilies               #-}
+{-# LANGUAGE TypeOperators              #-}
 
 module Humblr (humblr) where
 
@@ -11,6 +12,7 @@ import           Control.Lens                     (mapped, over, set, (&), (.~),
                                                    (^.))
 import           Control.Monad.Except
 import           Control.Monad.IO.Class           (liftIO)
+import           Control.Monad.State
 import           Crypto.KDF.Scrypt
 import           Data.Aeson
 import           Data.Aeson.Encode.Pretty         (encodePretty)
@@ -19,9 +21,11 @@ import           Data.ByteString                  (ByteString)
 import           Data.ByteString.Char8            (pack)
 import qualified Data.Map                         as M
 import           Data.Maybe                       (fromJust)
-import           Data.Serialize                   (Serialize, get, put)
+import           Data.Monoid
+import           Data.Serialize                   (Serialize)
 import qualified Data.Serialize                   as B
 import           Data.Text                        (Text)
+import qualified Data.Text                        as T
 import           Data.Text.Encoding               (decodeUtf8, encodeUtf8)
 import           Database.PostgreSQL.Simple       (Connection)
 import           GHC.Generics
@@ -42,21 +46,26 @@ import           Humblr.Database.Queries
 humblr :: Key -> Connection -> Application
 humblr key conn = serveWithContext humblrAPI (genAuthServerContext key) (server key conn)
 
-data RequestStatus e s
-  = RequestSuccess s
-  | RequestError [e]
+newtype FieldErrorT e m a = FieldErrorT { runFieldErrorT :: StateT (M.Map Text e) m a }
+  deriving (Functor, Applicative, Monad, MonadIO)
 
-data APIError e = APIError ServantErr (M.Map Text e)
-type APIHandler e = ExceptT (APIError e) IO
-apiHandlerToHandler :: ToJSON e => APIHandler e :~> Handler
-apiHandlerToHandler = Nat (withExceptT errConvert)
-  where
-    errConvert (APIError err vals)
-      = err { errBody = encodePretty $ object ["error" .= toJSON vals] }
+fieldError :: (Monad m, ToJSON e) => Text -> e -> FieldErrorT e m ()
+fieldError name val = FieldErrorT $ modify (M.insert name val)
 
-instance (ToJSON e, ToJSON s) => ToJSON (RequestStatus e s) where
-  toJSON (RequestSuccess s) = object [ "success" .= toJSON s ]
-  toJSON (RequestError e) = object [ "error" .= toJSON e ]
+whenSuccessful :: (Eq e, Monad m) => FieldErrorT e m a -> FieldErrorT e m ()
+whenSuccessful (FieldErrorT m) = FieldErrorT $ do
+  errs <- get
+  when (errs == M.empty) $ void m
+
+type FieldErrorHandler e = FieldErrorT e IO
+
+fieldErrorsToHandler :: (Eq e, ToJSON e) => ServantErr -> (FieldErrorHandler e :~> Handler)
+fieldErrorsToHandler err
+  = Nat $ \m -> ExceptT $ do
+      (res,errs) <- runStateT (runFieldErrorT m) M.empty
+      if errs == M.empty
+        then return $ Right res
+        else return $ Left err { errBody = encodePretty $ object ["error" .= toJSON errs] }
 
 newtype Token = Token { token :: Text }
   deriving (Eq, Generic, Show)
@@ -75,10 +84,13 @@ instance ToJSON UserInfo where
 data RegistrationError
   = EmailExists
   | UsernameExists
+  | PasswordTooShort
+  deriving (Eq, Show)
 
 instance ToJSON RegistrationError where
   toJSON EmailExists = toJSON ("That email is already taken" :: Text)
   toJSON UsernameExists = toJSON ("That username is already taken" :: Text)
+  toJSON PasswordTooShort = toJSON ("Your password is too short" :: Text)
 
 type RegisterUser = User' () Text Text Text ()
 instance FromJSON RegisterUser where
@@ -103,10 +115,10 @@ instance FromJSON LoginUser where
 type DisplayUser = User' Int Text () () ()
 instance Serialize DisplayUser where
   put user = do
-    put (user ^. userId)
-    put $ encodeUtf8 (user ^. userName)
+    B.put (user ^. userId)
+    B.put $ encodeUtf8 (user ^. userName)
 
-  get = User <$> get <*> (decodeUtf8 <$> get) <*> pure () <*> pure () <*> pure ()
+  get = User <$> B.get <*> (decodeUtf8 <$> B.get) <*> pure () <*> pure () <*> pure ()
 
 instance ToJSON DisplayUser where
   toJSON user
@@ -140,7 +152,7 @@ instance FromJSON CreatePost where
 
 type MyPostsAPI
   = Get '[JSON] [Post] :<|>
-    ReqBody '[JSON] CreatePost :> S.Post '[JSON] Text
+    ReqBody '[JSON] CreatePost :> PostCreated '[JSON] Text
 
 type PostAPI
   = Get '[JSON] Post :<|>
@@ -148,7 +160,7 @@ type PostAPI
     AuthProtect "cookie-auth" :> ReqBody '[JSON] CreatePost :> Patch '[JSON] Text
 
 type HumblrAPI
-  = "register" :> ReqBody '[JSON] RegisterUser :> S.Post '[JSON] () :<|>
+  = "register" :> ReqBody '[JSON] RegisterUser :> PostCreated '[JSON] () :<|>
     "login" :> ReqBody '[JSON] LoginUser :> S.Post '[JSON] Token :<|>
     "user" :> Capture "user" Text :> "posts" :> Get '[JSON] [Post] :<|>
     "me" :> AuthProtect "cookie-auth" :> Get '[JSON] UserInfo :<|>
@@ -237,7 +249,7 @@ postServer key conn pid = postWithId :<|> deletePostEndpoint :<|> updatePostEndp
 
 server :: Key -> Connection -> Server HumblrAPI
 server key conn
-  = enter apiHandlerToHandler register :<|>
+  = enter (fieldErrorsToHandler err409) register :<|>
     login :<|>
     userPosts :<|>
     me :<|>
@@ -247,19 +259,26 @@ server key conn
     postServer key conn :<|>
     serveDirectory "dist"
   where
-    register :: RegisterUser -> APIHandler RegistrationError ()
+    usernameNotExists username = do
+      exists <- liftIO $ usernameExists conn username
+      when exists $ fieldError "username" UsernameExists
+    emailNotExists email = do
+      exists <- liftIO $ emailExists conn email
+      when exists $ fieldError "email" EmailExists
+    passwordCorrectLength password = when (T.length password < 8) $ fieldError "password" PasswordTooShort
+
+    register :: RegisterUser -> FieldErrorHandler RegistrationError ()
     register user
       = let username = user ^. userName
             email = user ^. userEmail
             password = user ^. userPassword
         in do
-          maybeUser <- liftIO $ selectUserByUsername conn username
-          case maybeUser of
-            Just _ -> throwError . APIError err409 $ M.fromList [("username",UsernameExists)]
-            Nothing -> do
-              salt <- liftIO $ getEntropy 100
-              liftIO $ insertUser conn username email (genHash password salt) salt
-              return ()
+          usernameNotExists username
+          emailNotExists email
+          passwordCorrectLength password
+          whenSuccessful $ liftIO $ do
+            salt <- getEntropy 100
+            insertUser conn username email (genHash password salt) salt
 
     login :: LoginUser -> Handler Token
     login user

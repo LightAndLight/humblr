@@ -156,7 +156,7 @@ instance FromJSON CreatePost where
 
 type MyPostsAPI
   = Get '[JSON] [Post] :<|>
-    ReqBody '[JSON] CreatePost :> PostCreated '[JSON] Text
+    ReqBody '[JSON] CreatePost :> PostCreated '[JSON] ()
 
 type PostAPI
   = Get '[JSON] Post :<|>
@@ -214,10 +214,9 @@ myPostsServer key conn user = myPosts :<|> createPost
       rows <- liftIO $ selectPostsForUser conn (user ^. userId)
       return $ fmap (postUserId .~ user ^. userName) rows
 
-    createPost :: CreatePost -> Handler Text
-    createPost post = do
-      liftIO $ insertPost conn (user ^. userId) (post ^. postTitle) (post ^. postBody)
-      return "post created"
+    createPost :: CreatePost -> Handler ()
+    createPost post
+      = void . liftIO $ insertPost conn (user ^. userId) (post ^. postTitle) (post ^. postBody)
 
 postServer :: Key -> Connection -> Int -> Server PostAPI
 postServer key conn pid = postWithId :<|> deletePostEndpoint :<|> updatePostEndpoint

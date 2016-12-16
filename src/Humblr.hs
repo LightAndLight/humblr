@@ -219,33 +219,33 @@ myPostsServer key conn user = myPosts :<|> createPost
       = void . liftIO $ insertPost conn (user ^. userId) (post ^. postTitle) (post ^. postBody)
 
 postServer :: Key -> Connection -> Int -> Server PostAPI
-postServer key conn pid = postWithId :<|> deletePostEndpoint :<|> updatePostEndpoint
+postServer key conn pid = postById :<|> deletePostEndpoint :<|> updatePostEndpoint
   where
-    postWithId :: Handler Post
-    postWithId = do
-      maybePost <- liftIO $ selectPostWithId conn pid
+    postById :: Handler Post
+    postById = do
+      maybePost <- liftIO $ selectPostById conn pid
       case maybePost of
         Nothing -> throwError $ err401 { errBody = "Post does not exist" }
-        Just (post,username) -> return (post & postUserId .~ username)
+        Just post -> return post
 
     deletePostEndpoint :: DisplayUser -> Handler Text
     deletePostEndpoint user = do
-      maybePost <- liftIO $ selectPostWithId conn pid
+      maybePost <- liftIO $ selectPostById conn pid
       case maybePost of
         Nothing -> throwError $ err401 { errBody = "Post does not exist" }
-        Just (post,username)
-          | user ^. userId == post ^. postUserId -> do
+        Just post
+          | user ^. userName == post ^. postUserId -> do
               liftIO $ deletePost conn pid
               return "Post deleted"
           | otherwise -> throwError $ err401 { errBody = "You don't own that post" }
 
     updatePostEndpoint :: DisplayUser -> CreatePost -> Handler Text
     updatePostEndpoint user post = do
-      maybePost <- liftIO $ selectPostWithId conn pid
+      maybePost <- liftIO $ selectPostById conn pid
       case maybePost of
         Nothing -> throwError $ err401 { errBody = "Post does not exist" }
-        Just (post',username)
-          | user ^. userId == post' ^. postUserId -> do
+        Just post'
+          | user ^. userName == post' ^. postUserId -> do
               liftIO $ updatePost conn pid (post ^. postTitle) (post ^. postBody)
               return "Post updated"
           | otherwise -> throwError $ err401 { errBody = "You don't own that post" }
@@ -323,6 +323,4 @@ server key conn
       return $ fmap (set userEmail () . set userPassword () . set userSalt ()) rows
 
     allPosts :: Handler [Post]
-    allPosts = do
-      res <- liftIO $ selectPostsWithAuthors conn
-      return $ fmap (\(post,username) -> post & postUserId .~ username ) res
+    allPosts = liftIO $ selectPostsWithAuthors conn

@@ -7,7 +7,7 @@ module Humblr.Database.Queries
   , selectPosts
   , selectPostsForUser
   , selectPostsWithAuthors
-  , selectPostWithId
+  , selectPostById
 
   , usernameExists
   , emailExists
@@ -35,6 +35,7 @@ import           Humblr.Database.Models
 
 type User = User' Int Text Text ByteString ByteString
 type Post = Post' Int Int UTCTime Text Text
+type PostWithAuthor = Post' Int Text UTCTime Text Text
 
 userQuery :: Query UserColumnR
 userQuery = queryTable userTable
@@ -78,14 +79,22 @@ postQuery = queryTable postTable
 selectPosts :: Connection -> IO [Post]
 selectPosts conn = runQuery conn postQuery
 
-postsWithAuthorsQuery :: Query (PostColumnR,Column PGText)
+type PostWithAuthorColumn
+  = Post'
+    (Column PGInt4)
+    (Column PGText)
+    (Column PGTimestamptz)
+    (Column PGText)
+    (Column PGText)
+
+postsWithAuthorsQuery :: Query PostWithAuthorColumn
 postsWithAuthorsQuery = proc () -> do
   userRow <- userQuery -< ()
   postRow <- postQuery -< ()
   restrict -< userRow ^. userId .== postRow ^. postUserId
-  returnA -< (postRow,userRow ^. userName)
+  returnA -< (postRow & postUserId .~ (userRow ^. userName))
 
-selectPostsWithAuthors :: Connection -> IO [(Post,Text)]
+selectPostsWithAuthors :: Connection -> IO [PostWithAuthor]
 selectPostsWithAuthors conn = runQuery conn postsWithAuthorsQuery
 
 postsForUserQuery :: Int -> Query PostColumnR
@@ -97,14 +106,14 @@ postsForUserQuery uid = proc () -> do
 selectPostsForUser :: Connection -> Int -> IO [Post]
 selectPostsForUser conn uid = runQuery conn $ postsForUserQuery uid
 
-postWithIdQuery :: Int -> Query (PostColumnR,Column PGText)
-postWithIdQuery pid = proc () -> do
-  (postRow,username) <- postsWithAuthorsQuery -< ()
+postByIdQuery :: Int -> Query PostWithAuthorColumn
+postByIdQuery pid = proc () -> do
+  postRow <- postsWithAuthorsQuery -< ()
   restrict -< pgInt4 pid .== postRow ^. postId
-  returnA -< (postRow,username)
+  returnA -< postRow
 
-selectPostWithId :: Connection -> Int -> IO (Maybe (Post,Text))
-selectPostWithId conn pid = headMay <$> runQuery conn (postWithIdQuery pid)
+selectPostById :: Connection -> Int -> IO (Maybe PostWithAuthor)
+selectPostById conn pid = headMay <$> runQuery conn (postByIdQuery pid)
 
 insertPost :: Connection -> Int -> Text -> Text -> IO Int
 insertPost conn uid title body

@@ -134,7 +134,7 @@ instance ToJSON Post where
   toJSON post
     = object
       [ "id" .= (post ^. postId)
-      , "author" .= (post ^. postUserId)
+      , "author" .= (post ^. postAuthor)
       , "created" .= (floor $ utcTimeToPOSIXSeconds (post ^. postCreated) :: Int)
       , "title" .= (post ^. postTitle)
       , "body" .= (post ^. postBody)
@@ -212,7 +212,7 @@ myPostsServer key conn user = myPosts :<|> createPost
     myPosts :: Handler [Post]
     myPosts = do
       rows <- liftIO $ selectPostsForUser conn (user ^. userId)
-      return $ fmap (postUserId .~ user ^. userName) rows
+      return $ fmap (postAuthor .~ user ^. userName) rows
 
     createPost :: CreatePost -> Handler ()
     createPost post
@@ -234,7 +234,7 @@ postServer key conn pid = postById :<|> deletePostEndpoint :<|> updatePostEndpoi
       case maybePost of
         Nothing -> throwError $ err401 { errBody = "Post does not exist" }
         Just post
-          | user ^. userName == post ^. postUserId -> do
+          | user ^. userName == post ^. postAuthor -> do
               liftIO $ deletePost conn pid
               return "Post deleted"
           | otherwise -> throwError $ err401 { errBody = "You don't own that post" }
@@ -245,7 +245,7 @@ postServer key conn pid = postById :<|> deletePostEndpoint :<|> updatePostEndpoi
       case maybePost of
         Nothing -> throwError $ err401 { errBody = "Post does not exist" }
         Just post'
-          | user ^. userName == post' ^. postUserId -> do
+          | user ^. userName == post' ^. postAuthor -> do
               liftIO $ updatePost conn pid (post ^. postTitle) (post ^. postBody)
               return "Post updated"
           | otherwise -> throwError $ err401 { errBody = "You don't own that post" }
@@ -308,7 +308,7 @@ server key conn
         Nothing -> throwError $ err401 { errBody = encode UserDoesNotExist }
         Just user -> do
           rows <- liftIO $ selectPostsForUser conn (user ^. userId)
-          return $ fmap (postUserId .~ username) rows
+          return $ fmap (postAuthor .~ username) rows
 
     me :: DisplayUser -> Handler UserInfo
     me user = do

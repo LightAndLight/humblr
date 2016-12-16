@@ -18,7 +18,7 @@ module Humblr.Database.Models
   , PostColumnW
   , postTable
   , postId
-  , postUserId
+  , postAuthor
   , postCreated
   , postTitle
   , postBody
@@ -76,7 +76,7 @@ userTable = Table "users" $
 data Post' a b c d e
   = Post
     { _postId      :: a
-    , _postUserId  :: b
+    , _postAuthor  :: b
     , _postCreated :: c
     , _postTitle   :: d
     , _postBody    :: e
@@ -106,7 +106,7 @@ postTable :: Table PostColumnW PostColumnR
 postTable = Table "posts" $
   pPost Post
     { _postId = optional "id"
-    , _postUserId = required "user_id"
+    , _postAuthor = required "user_id"
     , _postCreated = optional "created"
     , _postTitle = required "title"
     , _postBody = required "body"

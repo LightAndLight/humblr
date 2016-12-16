@@ -91,8 +91,8 @@ postsWithAuthorsQuery :: Query PostWithAuthorColumn
 postsWithAuthorsQuery = proc () -> do
   userRow <- userQuery -< ()
   postRow <- postQuery -< ()
-  restrict -< userRow ^. userId .== postRow ^. postUserId
-  returnA -< (postRow & postUserId .~ (userRow ^. userName))
+  restrict -< userRow ^. userId .== postRow ^. postAuthor
+  returnA -< (postRow & postAuthor .~ (userRow ^. userName))
 
 selectPostsWithAuthors :: Connection -> IO [PostWithAuthor]
 selectPostsWithAuthors conn = runQuery conn postsWithAuthorsQuery
@@ -100,7 +100,7 @@ selectPostsWithAuthors conn = runQuery conn postsWithAuthorsQuery
 postsForUserQuery :: Int -> Query PostColumnR
 postsForUserQuery uid = proc () -> do
   postRow <- postQuery -< ()
-  restrict -< pgInt4 uid .== postRow ^. postUserId
+  restrict -< pgInt4 uid .== postRow ^. postAuthor
   returnA -< postRow
 
 selectPostsForUser :: Connection -> Int -> IO [Post]

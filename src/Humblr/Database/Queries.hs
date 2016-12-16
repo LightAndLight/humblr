@@ -118,12 +118,12 @@ updatePost conn pid title body = do
   runUpdate conn postTable updateFunc pred
   return ()
   where
-    updateFunc p = p
-      { _postId = Just (p ^. postId)
-      , _postTitle = pgStrictText title
-      , _postCreated = Just (p ^. postCreated)
-      , _postBody = pgStrictText body
-      }
+    updateFunc p
+      = p &
+        over postId Just &
+        postTitle .~ pgStrictText title &
+        over postCreated Just &
+        postBody .~ pgStrictText body
     pred p = p ^. postId .== pgInt4 pid
 
 deletePost :: Connection -> Int -> IO ()

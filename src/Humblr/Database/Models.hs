@@ -19,6 +19,7 @@ module Humblr.Database.Models
   , postTable
   , postId
   , postUserId
+  , postCreated
   , postTitle
   , postBody
 ) where
@@ -71,13 +72,14 @@ userTable = Table "users" $
     }
 
 -- posts
--- id | user_id | title | body
-data Post' a b c d
+-- id | user_id | time_created | title | body
+data Post' a b c d e
   = Post
-    { _postId     :: a
-    , _postUserId :: b
-    , _postTitle  :: c
-    , _postBody   :: d
+    { _postId      :: a
+    , _postUserId  :: b
+    , _postCreated :: c
+    , _postTitle   :: d
+    , _postBody    :: e
     }
 
 makeLenses ''Post'
@@ -86,6 +88,7 @@ type PostColumnR
   = Post'
     (Column PGInt4)
     (Column PGInt4)
+    (Column PGTimestamptz)
     (Column PGText)
     (Column PGText)
 
@@ -93,6 +96,7 @@ type PostColumnW
   = Post'
     (Maybe (Column PGInt4))
     (Column PGInt4)
+    (Maybe (Column PGTimestamptz))
     (Column PGText)
     (Column PGText)
 
@@ -103,6 +107,7 @@ postTable = Table "posts" $
   pPost Post
     { _postId = optional "id"
     , _postUserId = required "user_id"
+    , _postCreated = optional "created"
     , _postTitle = required "title"
     , _postBody = required "body"
     }

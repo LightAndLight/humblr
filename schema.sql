@@ -9,6 +9,7 @@ CREATE TABLE users (
 CREATE TABLE posts (
     id serial primary key,
     user_id integer references users(id),
+    time_created timestamp with time zone default current_timestamp,
     title varchar(100),
     body varchar(10000)
 );

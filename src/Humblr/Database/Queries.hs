@@ -26,6 +26,7 @@ import           Data.ByteString            (ByteString)
 import           Data.Int                   (Int64)
 import           Data.Profunctor.Product    (p2, p3, p4)
 import           Data.Text                  (Text)
+import           Data.Time                  (UTCTime)
 import           Database.PostgreSQL.Simple (Connection)
 import           Opaleye                    hiding (not, null)
 import           Safe                       (headMay)
@@ -33,7 +34,7 @@ import           Safe                       (headMay)
 import           Humblr.Database.Models
 
 type User = User' Int Text Text ByteString ByteString
-type Post = Post' Int Int Text Text
+type Post = Post' Int Int UTCTime Text Text
 
 userQuery :: Query UserColumnR
 userQuery = queryTable userTable
@@ -110,7 +111,7 @@ insertPost conn uid title body
   = head <$> runInsertReturning conn postTable newPost _postId
   where
     newPost
-      = Post Nothing (pgInt4 uid) (pgStrictText title) (pgStrictText body)
+      = Post Nothing (pgInt4 uid) Nothing (pgStrictText title) (pgStrictText body)
 
 updatePost :: Connection -> Int -> Text -> Text -> IO ()
 updatePost conn pid title body = do
@@ -120,6 +121,7 @@ updatePost conn pid title body = do
     updateFunc p = p
       { _postId = Just (p ^. postId)
       , _postTitle = pgStrictText title
+      , _postCreated = Just (p ^. postCreated)
       , _postBody = pgStrictText body
       }
     pred p = p ^. postId .== pgInt4 pid

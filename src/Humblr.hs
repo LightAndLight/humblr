@@ -27,6 +27,8 @@ import qualified Data.Serialize                   as B
 import           Data.Text                        (Text)
 import qualified Data.Text                        as T
 import           Data.Text.Encoding               (decodeUtf8, encodeUtf8)
+import           Data.Time                        (UTCTime)
+import           Data.Time.Clock.POSIX            (utcTimeToPOSIXSeconds)
 import           Database.PostgreSQL.Simple       (Connection)
 import           GHC.Generics
 import           Network.Wai                      (Application, Request,
@@ -127,12 +129,13 @@ instance ToJSON DisplayUser where
       , "username" .= (user ^. userName)
       ]
 
-type Post = Post' Int Text Text Text
+type Post = Post' Int Text UTCTime Text Text
 instance ToJSON Post where
   toJSON post
     = object
       [ "id" .= (post ^. postId)
       , "author" .= (post ^. postUserId)
+      , "created" .= (floor $ utcTimeToPOSIXSeconds (post ^. postCreated) :: Int)
       , "title" .= (post ^. postTitle)
       , "body" .= (post ^. postBody)
       ]
@@ -142,12 +145,13 @@ instance FromJSON Post where
     = Post <$>
       v .: "id" <*>
       v .: "author" <*>
+      v .: "created" <*>
       v .: "title" <*>
       v .: "body"
 
-type CreatePost = Post' () () Text Text
+type CreatePost = Post' () () () Text Text
 instance FromJSON CreatePost where
-    parseJSON (Object v) = Post () () <$> v .: "title" <*> v .: "body"
+    parseJSON (Object v) = Post () () () <$> v .: "title" <*> v .: "body"
     parseJSON invalid = typeMismatch "CreatePost" invalid
 
 type MyPostsAPI

@@ -35,10 +35,10 @@
 -- >   expectM (usernameAllowed . username) [UsernameNotAllowed] -< user
 -- >   returnA -< user
 --
--- >>> check validateUser (User "allowed_username" "weak" "invalid@email.com")
+-- >>> checkT validateUser (User "allowed_username" "weak" "invalid@email.com")
 -- Left [PasswordTooWeak, EmailInvalid]
 --
--- >>> check validateUser (User "allowed_username" "strong_password" "valid@email.com")
+-- >>> checkT validateUser (User "allowed_username" "strong_password" "valid@email.com")
 -- Right (User "allowed_username" "strong_password" "valid_email")
 --
 -- A `CheckT` computation can have an output type that is different to its input type,
@@ -60,13 +60,13 @@
 -- >       returnA -< user
 -- >     Nothing -> failure -< ()
 --
--- >>> check validateLogin (LoginPayload "incorrect_username" "incorrect_password")
+-- >>> checkT validateLogin (LoginPayload "incorrect_username" "incorrect_password")
 -- Left [UserNotFound]
 --
--- >>> check validateLogin (LoginPayload "correct_username" "incorrect_password")
+-- >>> checkT validateLogin (LoginPayload "correct_username" "incorrect_password")
 -- Left [PasswordIncorrect]
 --
--- >>> check validateLogin (LoginPayload "correct_username" "correct_password")
+-- >>> checkT validateLogin (LoginPayload "correct_username" "correct_password")
 -- Right (User "correct_username" "correct_password" "user@email.com")
 
 module Humblr.Check

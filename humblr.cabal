@@ -16,6 +16,7 @@ cabal-version:       >=1.10
 library
   hs-source-dirs:      src
   exposed-modules:     Humblr
+                     , Humblr.Check
                      , Humblr.Database.Models
                      , Humblr.Database.Queries
   build-depends:       base >= 4.7 && < 5
@@ -25,6 +26,7 @@ library
                      , cereal
                      , clientsession
                      , containers
+                     , contravariant
                      , cryptonite
                      , entropy
                      , lens
@@ -32,6 +34,7 @@ library
                      , opaleye
                      , postgresql-simple
                      , product-profunctors
+                     , profunctors
                      , safe
                      , servant
                      , servant-server

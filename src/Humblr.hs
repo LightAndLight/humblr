@@ -1,3 +1,4 @@
+{-# LANGUAGE Arrows                     #-}
 {-# LANGUAGE DataKinds                  #-}
 {-# LANGUAGE DeriveGeneric              #-}
 {-# LANGUAGE FlexibleInstances          #-}
@@ -8,20 +9,25 @@
 
 module Humblr (humblr) where
 
+import           Control.Arrow
 import           Control.Lens                     (mapped, over, set, (&), (.~),
                                                    (^.))
 import           Control.Monad.Except
 import           Control.Monad.IO.Class           (liftIO)
 import           Control.Monad.State
 import           Crypto.KDF.Scrypt
-import           Data.Aeson
+import           Data.Aeson                       (FromJSON (..), ToJSON (..),
+                                                   Value (..), object, (.:),
+                                                   (.=))
 import           Data.Aeson.Encode.Pretty         (encodePretty)
 import           Data.Aeson.Types                 (typeMismatch)
 import           Data.ByteString                  (ByteString)
 import           Data.ByteString.Char8            (pack)
+import           Data.Functor.Contravariant
 import qualified Data.Map                         as M
-import           Data.Maybe                       (fromJust)
+import           Data.Maybe                       (fromJust, isJust)
 import           Data.Monoid
+import           Data.Profunctor
 import           Data.Serialize                   (Serialize)
 import qualified Data.Serialize                   as B
 import           Data.Text                        (Text)
@@ -42,37 +48,19 @@ import           Servant.Utils.StaticFiles
 import           System.Entropy
 import           Web.ClientSession
 
+import           Humblr.Check
 import           Humblr.Database.Models
 import           Humblr.Database.Queries
 
 humblr :: Key -> Connection -> Application
 humblr key conn = serveWithContext humblrAPI (genAuthServerContext key) (server key conn)
 
-newtype FieldErrorT e m a = FieldErrorT { runFieldErrorT :: StateT (M.Map Text e) m a }
-  deriving (Functor, Applicative, Monad, MonadIO)
-
-fieldError :: (Monad m, ToJSON e) => Text -> e -> FieldErrorT e m ()
-fieldError name val = FieldErrorT $ modify (M.insert name val)
-
-whenSuccessful :: (Eq e, Monad m) => FieldErrorT e m a -> FieldErrorT e m ()
-whenSuccessful (FieldErrorT m) = FieldErrorT $ do
-  errs <- get
-  when (errs == M.empty) $ void m
-
-type FieldErrorHandler e = FieldErrorT e IO
-
-fieldErrorsToHandler :: (Eq e, ToJSON e) => ServantErr -> (FieldErrorHandler e :~> Handler)
-fieldErrorsToHandler err
-  = Nat $ \m -> ExceptT $ do
-      (res,errs) <- runStateT (runFieldErrorT m) M.empty
-      if errs == M.empty
-        then return $ Right res
-        else return $ Left err { errBody = encodePretty $ object ["error" .= toJSON errs] }
-
 newtype Token = Token { token :: Text }
   deriving (Eq, Generic, Show)
 
 instance ToJSON Token where
+
+type User = User' Int Text Text ByteString ByteString
 
 type UserInfo = User' Int Text Text () ()
 instance ToJSON UserInfo where
@@ -174,6 +162,13 @@ type HumblrAPI
     "posts" :> Capture "postId" Int :> PostAPI :<|>
     Raw
 
+runValidation :: ToJSON e => ServantErr -> a -> CheckT IO e a b -> (b -> Handler c) -> Handler c
+runValidation errCode input validator ifValid = do
+  res <- liftIO $ checkT validator input
+  case res of
+    Right b -> ifValid b
+    Left err -> throwError errCode { errBody = encodePretty (M.singleton ("errors" :: Text) err) }
+
 humblrAPI :: Proxy HumblrAPI
 humblrAPI = Proxy
 
@@ -199,12 +194,9 @@ data LoginError
   = UserDoesNotExist
   | PasswordIncorrect
 
-showLoginError :: LoginError -> String
-showLoginError UserDoesNotExist = "User does not exist"
-showLoginError PasswordIncorrect = "Incorrect password"
-
 instance ToJSON LoginError where
-  toJSON e = object ["error" .= showLoginError e]
+  toJSON UserDoesNotExist = toJSON ("User does not exist" :: Text)
+  toJSON PasswordIncorrect = toJSON ("Incorrect password" :: Text)
 
 myPostsServer :: Key -> Connection -> DisplayUser -> Server MyPostsAPI
 myPostsServer key conn user = myPosts :<|> createPost
@@ -252,7 +244,7 @@ postServer key conn pid = postById :<|> deletePostEndpoint :<|> updatePostEndpoi
 
 server :: Key -> Connection -> Server HumblrAPI
 server key conn
-  = enter (fieldErrorsToHandler err409) register :<|>
+  = register :<|>
     login :<|>
     userPosts :<|>
     me :<|>
@@ -262,50 +254,47 @@ server key conn
     postServer key conn :<|>
     serveDirectory "dist"
   where
-    usernameNotExists username = do
-      exists <- liftIO $ usernameExists conn username
-      when exists $ fieldError "username" UsernameExists
-    emailNotExists email = do
-      exists <- liftIO $ emailExists conn email
-      when exists $ fieldError "email" EmailExists
-    passwordCorrectLength password = when (T.length password < 8) $ fieldError "password" PasswordTooShort
+    validateRegistration :: CheckT IO (M.Map Text RegistrationError) RegisterUser RegisterUser
+    validateRegistration = proc user -> do
+      expectM (\u -> not <$> usernameExists conn (u ^. userName)) (M.singleton "username" UsernameExists) -< user
+      expectM (\u -> not <$> emailExists conn (u ^. userEmail)) (M.singleton "email" EmailExists) -< user
+      expect (\u -> T.length (u ^. userPassword) >= 8) (M.singleton "password" PasswordTooShort) -< user
+      returnA -< user
 
-    register :: RegisterUser -> FieldErrorHandler RegistrationError ()
+    register :: RegisterUser -> Handler ()
     register user
-      = let username = user ^. userName
-            email = user ^. userEmail
-            password = user ^. userPassword
-        in do
-          usernameNotExists username
-          emailNotExists email
-          passwordCorrectLength password
-          whenSuccessful $ liftIO $ do
-            salt <- getEntropy 100
-            insertUser conn username email (genHash password salt) salt
+      = runValidation err400 user validateRegistration $ \user -> void . liftIO $ do
+          salt <- getEntropy 100
+          insertUser conn (user ^. userName) (user ^. userEmail) (genHash (user ^. userPassword) salt) salt
+
+    passwordMatches password user
+      = genHash password (user ^. userSalt) == (user ^. userPassword)
+
+    validateLogin :: CheckT IO (M.Map Text LoginError) LoginUser User
+    validateLogin = proc loginUser -> do
+      maybeUser <- liftEffect (\u -> selectUserByUsername conn (u ^. userName)) -< loginUser
+      expect isJust (M.singleton "username" UserDoesNotExist) -< maybeUser
+      case maybeUser of
+        Just user -> do
+          whenFalse (M.singleton "password" PasswordIncorrect) -< passwordMatches (loginUser ^. userPassword) user
+          returnA -< user
+        Nothing -> failure -< ()
 
     login :: LoginUser -> Handler Token
     login user
-      = let username = user ^. userName
-            password = user ^. userPassword
-        in do
-          maybeUser <- liftIO $ selectUserByUsername conn username
-          case maybeUser of
-            Nothing -> throwError $ err401 { errBody = encode UserDoesNotExist }
-            Just userRow -> if genHash password (userRow ^. userSalt) /= userRow ^. userPassword
-              then throwError $ err401 { errBody = encode PasswordIncorrect }
-              else do
-                t <- liftIO . encryptIO key $
-                  B.encode (userRow &
-                    userEmail .~ () &
-                    userPassword .~ () &
-                    userSalt .~ ())
-                return (Token $ decodeUtf8 t)
+      = runValidation err401 user validateLogin $ \user -> do
+          t <- liftIO . encryptIO key $
+            B.encode (user &
+              userEmail .~ () &
+              userPassword .~ () &
+              userSalt .~ ())
+          return (Token $ decodeUtf8 t)
 
     userPosts :: Text -> Handler [Post]
     userPosts username = do
       maybeUser <- liftIO $ selectUserByUsername conn username
       case maybeUser of
-        Nothing -> throwError $ err401 { errBody = encode UserDoesNotExist }
+        Nothing -> throwError $ err401 { errBody = encodePretty UserDoesNotExist }
         Just user -> do
           rows <- liftIO $ selectPostsForUser conn (user ^. userId)
           return $ fmap (postAuthor .~ username) rows
@@ -314,7 +303,7 @@ server key conn
     me user = do
       maybeUser <- liftIO $ selectUserById conn (user ^. userId)
       case maybeUser of
-        Nothing -> throwError $ err401 { errBody = encode UserDoesNotExist }
+        Nothing -> throwError $ err401 { errBody = encodePretty UserDoesNotExist }
         Just userRow -> return (userRow & userPassword .~ () & userSalt .~ ())
 
     allUsers :: Handler [DisplayUser]

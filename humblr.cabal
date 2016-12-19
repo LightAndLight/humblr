@@ -17,7 +17,7 @@ library
   hs-source-dirs:      src
   exposed-modules:     Humblr
                      , Humblr.Check
-                     , Humblr.Check.Json
+                     , Humblr.Check.Field
                      , Humblr.Database.Models
                      , Humblr.Database.Queries
   build-depends:       base >= 4.7 && < 5

@@ -1,0 +1,3 @@
+[submodule "frontend"]
+	path = frontend
+	url = https://gitlab.com/lightandlight/humblr-frontend.git

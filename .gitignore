@@ -1,3 +1,4 @@
 .stack-work
 .pgsql
 logfile
+dist/index.js

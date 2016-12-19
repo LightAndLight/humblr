@@ -1,6 +1,5 @@
 module Humblr.Check.Field
-  ( C.CheckT
-  , C.Check
+  ( CheckField
   , CheckFieldT
   , C.checkT
   , C.check
@@ -15,13 +14,14 @@ module Humblr.Check.Field
   ) where
 
 import           Data.Aeson
-import           Data.List.NonEmpty (NonEmpty (..))
-import           Data.Map           (Map)
-import qualified Data.Map           as M
+import           Data.Functor.Identity (Identity)
+import           Data.List.NonEmpty    (NonEmpty (..))
+import           Data.Map              (Map)
+import qualified Data.Map              as M
 import           Data.Semigroup
-import           Data.Text          (Text)
+import           Data.Text             (Text)
 
-import qualified Humblr.Check       as C
+import qualified Humblr.Check          as C
 
 newtype FieldErrors e = FieldErrors { getFieldErrors :: Map Text (NonEmpty e) }
 
@@ -42,6 +42,7 @@ instance ToJSON e => ToJSON (FieldErrors e) where
       transformError (fieldName,err :| errs) = fieldName .= toJSON (err:errs)
 
 type CheckFieldT m e a b = C.CheckT m (FieldErrors e) a b
+type CheckField e a b = CheckFieldT Identity e a b
 
 -- | Runs a predicate, and logs an error for a field if the predicate fails
 expectM
@@ -56,13 +57,14 @@ expectM field p err = C.expectM p (singleError field err)
 expect :: Applicative m => Text -> (a -> Bool) -> e -> CheckFieldT m e a a
 expect field p err = C.expect p (singleError field err)
 
--- | Combine many predicate-error pairs into a single check
+-- | Combine many predicate-error pairs into a single field check
 --
 -- > expectAll = foldMap (uncurry expectM)
 expectAll :: (Foldable f, Monad m, Semigroup e) => Text -> f (a -> m Bool,e) -> CheckFieldT m e a a
 expectAll field = foldMap (uncurry (expectM field))
 
--- | Runs a predicate, logging some errors if the predicate fails, and returns the result of the predicate
+-- | Runs a predicate, logging some errors for a field if the predicate fails,
+-- and returns the result of the predicate
 supposeM :: Monad m => Text -> (a -> m Bool) -> e -> CheckFieldT m e a Bool
 supposeM field p err = C.supposeM p (singleError field err)
 
@@ -70,6 +72,6 @@ supposeM field p err = C.supposeM p (singleError field err)
 suppose :: Applicative m => Text -> (a -> Bool) -> e -> CheckFieldT m e a Bool
 suppose field p err = C.suppose p (singleError field err)
 
--- | Logs an error when `False` is passed in
+-- | Logs an error for a field when `False` is passed in
 whenFalse :: Applicative m => Text -> e -> CheckFieldT m e Bool Bool
 whenFalse field = expect field id

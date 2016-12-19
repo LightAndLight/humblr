@@ -48,7 +48,7 @@ import           Servant.Utils.StaticFiles
 import           System.Entropy
 import           Web.ClientSession
 
-import           Humblr.Check
+import           Humblr.Check.Field
 import           Humblr.Database.Models
 import           Humblr.Database.Queries
 
@@ -162,7 +162,7 @@ type HumblrAPI
     "posts" :> Capture "postId" Int :> PostAPI :<|>
     Raw
 
-runValidation :: ToJSON e => ServantErr -> a -> CheckT IO e a b -> (b -> Handler c) -> Handler c
+runValidation :: ToJSON e => ServantErr -> a -> CheckFieldT IO e a b -> (b -> Handler c) -> Handler c
 runValidation errCode input validator ifValid = do
   res <- liftIO $ checkT validator input
   case res of
@@ -254,11 +254,12 @@ server key conn
     postServer key conn :<|>
     serveDirectory "dist"
   where
-    validateRegistration :: CheckT IO (M.Map Text RegistrationError) RegisterUser RegisterUser
+    validateRegistration :: CheckFieldT IO RegistrationError RegisterUser RegisterUser
     validateRegistration = proc user -> do
-      expectM (\u -> not <$> usernameExists conn (u ^. userName)) (M.singleton "username" UsernameExists) -< user
-      expectM (\u -> not <$> emailExists conn (u ^. userEmail)) (M.singleton "email" EmailExists) -< user
-      expect (\u -> T.length (u ^. userPassword) >= 8) (M.singleton "password" PasswordTooShort) -< user
+      expectM "username" (\u -> not <$> usernameExists conn (u ^. userName)) UsernameExists -< user
+      expectM "email" (\u -> not <$> emailExists conn (u ^. userEmail)) EmailExists -< user
+      expectM "email" (\u -> not <$> emailExists conn (u ^. userEmail)) EmailExists -< user
+      expect "password" (\u -> T.length (u ^. userPassword) >= 8) PasswordTooShort -< user
       returnA -< user
 
     register :: RegisterUser -> Handler ()
@@ -270,13 +271,13 @@ server key conn
     passwordMatches password user
       = genHash password (user ^. userSalt) == (user ^. userPassword)
 
-    validateLogin :: CheckT IO (M.Map Text LoginError) LoginUser User
+    validateLogin :: CheckFieldT IO LoginError LoginUser User
     validateLogin = proc loginUser -> do
       maybeUser <- liftEffect (\u -> selectUserByUsername conn (u ^. userName)) -< loginUser
-      expect isJust (M.singleton "username" UserDoesNotExist) -< maybeUser
+      expect "username" isJust UserDoesNotExist -< maybeUser
       case maybeUser of
         Just user -> do
-          whenFalse (M.singleton "password" PasswordIncorrect) -< passwordMatches (loginUser ^. userPassword) user
+          whenFalse "password" PasswordIncorrect -< passwordMatches (loginUser ^. userPassword) user
           returnA -< user
         Nothing -> failure -< ()
 

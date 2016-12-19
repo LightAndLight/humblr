@@ -17,6 +17,7 @@ library
   hs-source-dirs:      src
   exposed-modules:     Humblr
                      , Humblr.Check
+                     , Humblr.Check.Json
                      , Humblr.Database.Models
                      , Humblr.Database.Queries
   build-depends:       base >= 4.7 && < 5
@@ -36,6 +37,7 @@ library
                      , product-profunctors
                      , profunctors
                      , safe
+                     , semigroups
                      , servant
                      , servant-server
                      , text

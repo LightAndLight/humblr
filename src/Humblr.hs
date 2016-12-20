@@ -10,66 +10,108 @@
 module Humblr (humblr) where
 
 import           Control.Arrow
-import           Control.Lens                     (mapped, over, set, (&), (.~),
-                                                   (^.))
+import           Control.Lens               (mapped, over, set, (&), (.~), (^.))
 import           Control.Monad.Except
-import           Control.Monad.IO.Class           (liftIO)
-import           Control.Monad.State
+import           Control.Monad.IO.Class     (liftIO)
 import           Crypto.KDF.Scrypt
-import           Data.Aeson                       (FromJSON (..), ToJSON (..),
-                                                   Value (..), object, (.:),
-                                                   (.=))
-import           Data.Aeson.Encode.Pretty         (encodePretty)
-import           Data.Aeson.Types                 (typeMismatch)
-import           Data.ByteString                  (ByteString)
-import           Data.ByteString.Char8            (pack)
+import           Data.Aeson                 (FromJSON (..), ToJSON (..),
+                                             Value (..), object, (.:), (.=))
+import           Data.Aeson.Encode.Pretty   (encodePretty)
+import           Data.Aeson.Types           (typeMismatch)
+import           Data.ByteString            (ByteString)
+import           Data.ByteString.Char8      (pack)
+import           Data.Check.Field
 import           Data.Functor.Contravariant
-import qualified Data.Map                         as M
-import           Data.Maybe                       (fromJust, isJust)
+import qualified Data.Map                   as M
+import           Data.Maybe                 (fromJust, isJust)
 import           Data.Monoid
 import           Data.Profunctor
-import           Data.Serialize                   (Serialize)
-import qualified Data.Serialize                   as B
-import           Data.Text                        (Text)
-import qualified Data.Text                        as T
-import           Data.Text.Encoding               (decodeUtf8, encodeUtf8)
-import           Data.Time                        (UTCTime)
-import           Data.Time.Clock.POSIX            (utcTimeToPOSIXSeconds)
-import           Database.PostgreSQL.Simple       (Connection)
+import           Data.Serialize             (Serialize)
+import qualified Data.Serialize             as B
+import qualified Data.Text                  as T
+import           Data.Text.Encoding         (decodeUtf8, encodeUtf8)
+import qualified Data.Text.Lazy             as L
+import           Data.Time                  (UTCTime)
+import           Data.Time.Clock.POSIX      (utcTimeToPOSIXSeconds)
+import           Database.PostgreSQL.Simple (Connection)
 import           GHC.Generics
-import           Network.Wai                      (Application, Request,
-                                                   requestHeaders)
-import           Opaleye                          (runQuery)
-import           Servant                          hiding (Post)
-import qualified Servant                          as S (Post)
-import           Servant.API.Experimental.Auth
-import           Servant.Server.Experimental.Auth
-import           Servant.Utils.StaticFiles
+import           Lucid
+import           Network.Wai                (Application, Request,
+                                             requestHeaders)
+import           Opaleye                    (runQuery)
 import           System.Entropy
 import           Web.ClientSession
+import           Web.FormUrlEncoded
+import           Web.Scotty
 
-import           Humblr.Check.Field
 import           Humblr.Database.Models
 import           Humblr.Database.Queries
+import qualified Humblr.Html                as H
 
-humblr :: Key -> Connection -> Application
-humblr key conn = serveWithContext humblrAPI (genAuthServerContext key) (server key conn)
+humblr :: Key -> Connection -> IO Application
+humblr key conn = scottyApp (humblrApp key conn)
 
-newtype Token = Token { token :: Text }
+{-
+type MyPostsAPI
+  = Get '[JSON] [Post] :<|>
+    ReqBody '[JSON] CreatePost :> PostCreated '[JSON] ()
+
+type PostAPI
+  = Get '[JSON] Post :<|>
+    AuthProtect "cookie-auth" :> Delete '[JSON] Text :<|>
+    AuthProtect "cookie-auth" :> ReqBody '[JSON] CreatePost :> Patch '[JSON] Text
+
+type HumblrAPI
+  = "register" :> ReqBody '[JSON] RegisterUser :> PostCreated '[JSON] () :<|>
+    "login" :> ReqBody '[FormUrlEncoded] LoginUser :> S.Post '[JSON] Token :<|>
+    "user" :> Capture "user" Text :> "posts" :> Get '[JSON] [Post] :<|>
+    "me" :> AuthProtect "cookie-auth" :> Get '[JSON] UserInfo :<|>
+    "my" :> "posts" :> AuthProtect "cookie-auth" :> MyPostsAPI :<|>
+    "users" :> Get '[JSON] [DisplayUser] :<|>
+    "posts" :> Get '[JSON] [Post] :<|>
+    "posts" :> Capture "postId" Int :> PostAPI :<|>
+    Get '[HTML] (Html ())
+-}
+
+data LoginError
+  = UserDoesNotExist
+  | PasswordIncorrect
+
+humblrApp :: Key -> Connection -> ScottyM ()
+humblrApp key conn = do
+  get "/" . html . renderText $ H.homepage M.empty
+  post "/login" $ do
+    payload <- body
+    case urlDecodeForm payload >>= fromForm of
+      Left err -> raise $ L.fromStrict err
+      Right loginUser -> do
+        res <- liftIO $ checkT validateLogin loginUser
+        case res of
+          Right user -> do
+            t <- liftIO . encryptIO key $
+              B.encode (user &
+                userEmail .~ () &
+                userPassword .~ () &
+                userSalt .~ ())
+            json (Token $ decodeUtf8 t)
+          Left errs -> html . renderText . H.homepage $ fmap showLoginError errs
+  where
+    validateLogin :: CheckFieldT IO LoginError LoginUser User
+    validateLogin = proc loginUser -> do
+      maybeUser <- liftEffect (selectUserByUsername conn) -< loginUsername loginUser
+      expect "username" isJust UserDoesNotExist -< maybeUser
+      case maybeUser of
+        Just user -> do
+          whenFalse "password" PasswordIncorrect -< passwordMatches (loginPassword loginUser) user
+          returnA -< user
+        Nothing -> failure -< ()
+
+newtype Token = Token { token :: T.Text }
   deriving (Eq, Generic, Show)
 
 instance ToJSON Token where
 
-type User = User' Int Text Text ByteString ByteString
-
-type UserInfo = User' Int Text Text () ()
-instance ToJSON UserInfo where
-  toJSON user
-    = object
-      [ "id" .= (user ^. userId)
-      , "username" .= (user ^. userName)
-      , "email" .= (user ^. userEmail)
-      ]
+type User = User' Int T.Text T.Text ByteString ByteString
 
 data RegistrationError
   = EmailExists
@@ -77,47 +119,28 @@ data RegistrationError
   | PasswordTooShort
   deriving (Eq, Show)
 
-instance ToJSON RegistrationError where
-  toJSON EmailExists = toJSON ("That email is already taken" :: Text)
-  toJSON UsernameExists = toJSON ("That username is already taken" :: Text)
-  toJSON PasswordTooShort = toJSON ("Your password is too short" :: Text)
+showLoginError :: LoginError -> T.Text
+showLoginError EmailExists = "That email is already taken"
+showLoginError UsernameExists = "That username is already taken"
+showLoginError PasswordTooShort = "Your password is too short"
 
-type RegisterUser = User' () Text Text Text ()
-instance FromJSON RegisterUser where
-  parseJSON (Object v)
-    = User () <$>
-      v .: "username" <*>
-      v .: "email" <*>
-      v .: "password" <*>
-    pure ()
-  parseJSON invalid = typeMismatch "RegisterUser" invalid
+data LoginUser = LoginUser { loginUsername :: T.Text, loginPassword :: T.Text }
+instance FromForm LoginUser where
+  fromForm form
+    = LoginUser <$>
+      parseUnique "username" form <*>
+      parseUnique "password" form
 
-type LoginUser = User' () Text () Text ()
-instance FromJSON LoginUser where
-  parseJSON (Object v)
-    = User () <$>
-      v .: "username" <*>
-      pure () <*>
-      v .: "password" <*>
-      pure ()
-  parseJSON invalid = typeMismatch "LoginUser" invalid
-
-type DisplayUser = User' Int Text () () ()
+{-
 instance Serialize DisplayUser where
   put user = do
     B.put (user ^. userId)
     B.put $ encodeUtf8 (user ^. userName)
 
   get = User <$> B.get <*> (decodeUtf8 <$> B.get) <*> pure () <*> pure () <*> pure ()
+-}
 
-instance ToJSON DisplayUser where
-  toJSON user
-    = object
-      [ "id" .= (user ^. userId)
-      , "username" .= (user ^. userName)
-      ]
-
-type Post = Post' Int Text UTCTime Text Text
+type Post = Post' Int T.Text UTCTime T.Text T.Text
 instance ToJSON Post where
   toJSON post
     = object
@@ -137,44 +160,19 @@ instance FromJSON Post where
       v .: "title" <*>
       v .: "body"
 
-type CreatePost = Post' () () () Text Text
-instance FromJSON CreatePost where
-    parseJSON (Object v) = Post () () () <$> v .: "title" <*> v .: "body"
-    parseJSON invalid = typeMismatch "CreatePost" invalid
-
-type MyPostsAPI
-  = Get '[JSON] [Post] :<|>
-    ReqBody '[JSON] CreatePost :> PostCreated '[JSON] ()
-
-type PostAPI
-  = Get '[JSON] Post :<|>
-    AuthProtect "cookie-auth" :> Delete '[JSON] Text :<|>
-    AuthProtect "cookie-auth" :> ReqBody '[JSON] CreatePost :> Patch '[JSON] Text
-
-type HumblrAPI
-  = "register" :> ReqBody '[JSON] RegisterUser :> PostCreated '[JSON] () :<|>
-    "login" :> ReqBody '[JSON] LoginUser :> S.Post '[JSON] Token :<|>
-    "user" :> Capture "user" Text :> "posts" :> Get '[JSON] [Post] :<|>
-    "me" :> AuthProtect "cookie-auth" :> Get '[JSON] UserInfo :<|>
-    "my" :> "posts" :> AuthProtect "cookie-auth" :> MyPostsAPI :<|>
-    "users" :> Get '[JSON] [DisplayUser] :<|>
-    "posts" :> Get '[JSON] [Post] :<|>
-    "posts" :> Capture "postId" Int :> PostAPI :<|>
-    Raw
-
+{-
 runValidation :: ToJSON e => ServantErr -> a -> CheckFieldT IO e a b -> (b -> Handler c) -> Handler c
 runValidation errCode input validator ifValid = do
   res <- liftIO $ checkT validator input
   case res of
     Right b -> ifValid b
     Left err -> throwError errCode { errBody = encodePretty (M.singleton ("errors" :: Text) err) }
+-}
 
-humblrAPI :: Proxy HumblrAPI
-humblrAPI = Proxy
-
-genHash :: Text -> ByteString -> ByteString
+genHash :: T.Text -> ByteString -> ByteString
 genHash password = generate (Parameters (2^14) 8 1 100) (encodeUtf8 password)
 
+{-
 authHandler :: Key -> AuthHandler Request DisplayUser
 authHandler key
   = mkAuthHandler $ \req -> case lookup "auth" (requestHeaders req) of
@@ -189,10 +187,6 @@ type instance AuthServerData (AuthProtect "cookie-auth") = DisplayUser
 
 genAuthServerContext :: Key -> Context (AuthHandler Request DisplayUser ': '[])
 genAuthServerContext key = authHandler key :. EmptyContext
-
-data LoginError
-  = UserDoesNotExist
-  | PasswordIncorrect
 
 instance ToJSON LoginError where
   toJSON UserDoesNotExist = toJSON ("User does not exist" :: Text)
@@ -252,8 +246,9 @@ server key conn
     allUsers :<|>
     allPosts :<|>
     postServer key conn :<|>
-    serveDirectory "dist"
+    homepage
   where
+    {-
     validateRegistration :: CheckFieldT IO RegistrationError RegisterUser RegisterUser
     validateRegistration = proc user -> do
       expectM "username" (\u -> not <$> usernameExists conn (u ^. userName)) UsernameExists -< user
@@ -261,35 +256,15 @@ server key conn
       expectM "email" (\u -> not <$> emailExists conn (u ^. userEmail)) EmailExists -< user
       expect "password" (\u -> T.length (u ^. userPassword) >= 8) PasswordTooShort -< user
       returnA -< user
+    -}
 
     register :: RegisterUser -> Handler ()
-    register user
-      = runValidation err400 user validateRegistration $ \user -> void . liftIO $ do
-          salt <- getEntropy 100
-          insertUser conn (user ^. userName) (user ^. userEmail) (genHash (user ^. userPassword) salt) salt
+    register user = void . liftIO $ do
+      salt <- getEntropy 100
+      insertUser conn (user ^. userName) (user ^. userEmail) (genHash (user ^. userPassword) salt) salt
 
     passwordMatches password user
       = genHash password (user ^. userSalt) == (user ^. userPassword)
-
-    validateLogin :: CheckFieldT IO LoginError LoginUser User
-    validateLogin = proc loginUser -> do
-      maybeUser <- liftEffect (\u -> selectUserByUsername conn (u ^. userName)) -< loginUser
-      expect "username" isJust UserDoesNotExist -< maybeUser
-      case maybeUser of
-        Just user -> do
-          whenFalse "password" PasswordIncorrect -< passwordMatches (loginUser ^. userPassword) user
-          returnA -< user
-        Nothing -> failure -< ()
-
-    login :: LoginUser -> Handler Token
-    login user
-      = runValidation err401 user validateLogin $ \user -> do
-          t <- liftIO . encryptIO key $
-            B.encode (user &
-              userEmail .~ () &
-              userPassword .~ () &
-              userSalt .~ ())
-          return (Token $ decodeUtf8 t)
 
     userPosts :: Text -> Handler [Post]
     userPosts username = do
@@ -314,3 +289,5 @@ server key conn
 
     allPosts :: Handler [Post]
     allPosts = liftIO $ selectPostsWithAuthors conn
+
+-}

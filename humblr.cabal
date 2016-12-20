@@ -18,26 +18,29 @@ library
   exposed-modules:     Humblr
                      , Humblr.Database.Models
                      , Humblr.Database.Queries
+                     , Humblr.Html
   build-depends:       base >= 4.7 && < 5
                      , aeson
                      , aeson-pretty
                      , bytestring
                      , cereal
+                     , check
                      , clientsession
                      , containers
                      , contravariant
                      , cryptonite
                      , entropy
+                     , http-api-data
                      , lens
+                     , lucid
                      , mtl
                      , opaleye
                      , postgresql-simple
                      , product-profunctors
                      , profunctors
                      , safe
+                     , scotty
                      , semigroups
-                     , servant
-                     , servant-server
                      , text
                      , time
                      , transformers

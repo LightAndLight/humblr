@@ -1,1 +1,8 @@
 resolver: lts-7.13
+extra-deps: [http-api-data-0.3.3]
+packages:
+  - location: .
+  - location:
+      git: https://gitlab.com/lightandlight/haskell-arrow-validation.git
+      commit: HEAD
+    extra-dep: true

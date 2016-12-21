@@ -9,9 +9,10 @@
 module Humblr (humblr) where
 
 import           Control.Arrow
-import           Control.Lens               (mapped, over, set, (&), (.~), (^.))
+import           Control.Lens               hiding ((.=))
 import           Control.Monad.Except
 import           Control.Monad.IO.Class     (liftIO)
+import           Control.Monad.Reader
 import           Crypto.KDF.Scrypt
 import           Data.Aeson                 (FromJSON (..), ToJSON (..),
                                              Value (..), object, (.:), (.=))
@@ -50,44 +51,12 @@ import           Humblr.Database.Models
 import           Humblr.Database.Queries
 import qualified Humblr.Html                as H
 
-humblr :: Key -> Connection -> IO Application
-humblr key conn = scottyApp (humblrApp key conn)
-
 eitherToMaybe :: Either e a -> Maybe a
 eitherToMaybe (Left _) = Nothing
 eitherToMaybe (Right a) = Just a
 
-{-
-type MyPostsAPI
-  = Get '[JSON] [Post] :<|>
-    ReqBody '[JSON] CreatePost :> PostCreated '[JSON] ()
-
-type PostAPI
-  = Get '[JSON] Post :<|>
-    AuthProtect "cookie-auth" :> Delete '[JSON] Text :<|>
-    AuthProtect "cookie-auth" :> ReqBody '[JSON] CreatePost :> Patch '[JSON] Text
-
-type HumblrAPI
-  = "register" :> ReqBody '[JSON] RegisterUser :> PostCreated '[JSON] () :<|>
-    "user" :> Capture "user" Text :> "posts" :> Get '[JSON] [Post] :<|>
-    "me" :> AuthProtect "cookie-auth" :> Get '[JSON] UserInfo :<|>
-    "my" :> "posts" :> AuthProtect "cookie-auth" :> MyPostsAPI :<|>
-    "users" :> Get '[JSON] [DisplayUser] :<|>
-    "posts" :> Get '[JSON] [Post] :<|>
-    "posts" :> Capture "postId" Int :> PostAPI :<|>
-    Get '[HTML] (Html ())
--}
-
-data LoginError
-  = UserDoesNotExist
-  | PasswordIncorrect
-
-showLoginError :: LoginError -> T.Text
-showLoginError UserDoesNotExist = "Incorrect username"
-showLoginError PasswordIncorrect = "Incorrect password"
-
-humblrApp :: Key -> Connection -> ScottyM ()
-humblrApp key conn = do
+humblr :: Key -> Connection -> ScottyM ()
+humblr key conn = do
   get "/" $ do
     cookie <- getCookie "auth"
     let maybeUser = encodeUtf8 <$> cookie >>= decrypt key >>= eitherToMaybe . B.decode
@@ -119,6 +88,37 @@ humblrApp key conn = do
           whenFalse "password" PasswordIncorrect -< passwordMatches (loginPassword loginUser) user
           returnA -< user
         Nothing -> failure -< ()
+
+
+{-
+type MyPostsAPI
+  = Get '[JSON] [Post] :<|>
+    ReqBody '[JSON] CreatePost :> PostCreated '[JSON] ()
+
+type PostAPI
+  = Get '[JSON] Post :<|>
+    AuthProtect "cookie-auth" :> Delete '[JSON] Text :<|>
+    AuthProtect "cookie-auth" :> ReqBody '[JSON] CreatePost :> Patch '[JSON] Text
+
+type HumblrAPI
+  = "register" :> ReqBody '[JSON] RegisterUser :> PostCreated '[JSON] () :<|>
+    "user" :> Capture "user" Text :> "posts" :> Get '[JSON] [Post] :<|>
+    "me" :> AuthProtect "cookie-auth" :> Get '[JSON] UserInfo :<|>
+    "my" :> "posts" :> AuthProtect "cookie-auth" :> MyPostsAPI :<|>
+    "users" :> Get '[JSON] [DisplayUser] :<|>
+    "posts" :> Get '[JSON] [Post] :<|>
+    "posts" :> Capture "postId" Int :> PostAPI :<|>
+    Get '[HTML] (Html ())
+-}
+
+data LoginError
+  = UserDoesNotExist
+  | PasswordIncorrect
+
+showLoginError :: LoginError -> T.Text
+showLoginError UserDoesNotExist = "Incorrect username"
+showLoginError PasswordIncorrect = "Incorrect password"
+
 
 newtype Token = Token { token :: T.Text }
   deriving (Eq, Generic, Show)

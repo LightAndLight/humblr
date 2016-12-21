@@ -31,6 +31,7 @@ library
                      , cryptonite
                      , entropy
                      , http-api-data
+                     , http-types
                      , lens
                      , lucid
                      , mtl
@@ -40,6 +41,7 @@ library
                      , profunctors
                      , safe
                      , scotty
+                     , scotty-cookie
                      , semigroups
                      , text
                      , time

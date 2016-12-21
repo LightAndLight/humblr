@@ -1,7 +1,6 @@
 {-# LANGUAGE Arrows                     #-}
 {-# LANGUAGE DataKinds                  #-}
 {-# LANGUAGE DeriveGeneric              #-}
-{-# LANGUAGE FlexibleInstances          #-}
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
 {-# LANGUAGE OverloadedStrings          #-}
 {-# LANGUAGE TypeFamilies               #-}
@@ -22,6 +21,7 @@ import           Data.ByteString            (ByteString)
 import           Data.ByteString.Char8      (pack)
 import           Data.Check.Field
 import           Data.Functor.Contravariant
+import qualified Data.List.NonEmpty         as N
 import qualified Data.Map                   as M
 import           Data.Maybe                 (fromJust, isJust)
 import           Data.Monoid
@@ -36,6 +36,7 @@ import           Data.Time.Clock.POSIX      (utcTimeToPOSIXSeconds)
 import           Database.PostgreSQL.Simple (Connection)
 import           GHC.Generics
 import           Lucid
+import           Network.HTTP.Types.Status
 import           Network.Wai                (Application, Request,
                                              requestHeaders)
 import           Opaleye                    (runQuery)
@@ -43,6 +44,7 @@ import           System.Entropy
 import           Web.ClientSession
 import           Web.FormUrlEncoded
 import           Web.Scotty
+import           Web.Scotty.Cookie
 
 import           Humblr.Database.Models
 import           Humblr.Database.Queries
@@ -50,6 +52,10 @@ import qualified Humblr.Html                as H
 
 humblr :: Key -> Connection -> IO Application
 humblr key conn = scottyApp (humblrApp key conn)
+
+eitherToMaybe :: Either e a -> Maybe a
+eitherToMaybe (Left _) = Nothing
+eitherToMaybe (Right a) = Just a
 
 {-
 type MyPostsAPI
@@ -63,7 +69,6 @@ type PostAPI
 
 type HumblrAPI
   = "register" :> ReqBody '[JSON] RegisterUser :> PostCreated '[JSON] () :<|>
-    "login" :> ReqBody '[FormUrlEncoded] LoginUser :> S.Post '[JSON] Token :<|>
     "user" :> Capture "user" Text :> "posts" :> Get '[JSON] [Post] :<|>
     "me" :> AuthProtect "cookie-auth" :> Get '[JSON] UserInfo :<|>
     "my" :> "posts" :> AuthProtect "cookie-auth" :> MyPostsAPI :<|>
@@ -77,9 +82,16 @@ data LoginError
   = UserDoesNotExist
   | PasswordIncorrect
 
+showLoginError :: LoginError -> T.Text
+showLoginError UserDoesNotExist = "Incorrect username"
+showLoginError PasswordIncorrect = "Incorrect password"
+
 humblrApp :: Key -> Connection -> ScottyM ()
 humblrApp key conn = do
-  get "/" . html . renderText $ H.homepage M.empty
+  get "/" $ do
+    cookie <- getCookie "auth"
+    let maybeUser = encodeUtf8 <$> cookie >>= decrypt key >>= eitherToMaybe . B.decode
+    html . renderText $ H.homepage maybeUser M.empty
   post "/login" $ do
     payload <- body
     case urlDecodeForm payload >>= fromForm of
@@ -89,13 +101,15 @@ humblrApp key conn = do
         case res of
           Right user -> do
             t <- liftIO . encryptIO key $
-              B.encode (user &
-                userEmail .~ () &
-                userPassword .~ () &
-                userSalt .~ ())
-            json (Token $ decodeUtf8 t)
-          Left errs -> html . renderText . H.homepage $ fmap showLoginError errs
+              B.encode $ H.DisplayUser (user ^. userId) (user ^. userName)
+            status status303
+            setHeader "Location" "/"
+            setSimpleCookie "auth" $ decodeUtf8 t
+          Left errs -> html . renderText . H.homepage Nothing $ fmap (showLoginError . N.head) (getFieldErrors errs)
   where
+    passwordMatches password user
+      = genHash password (user ^. userSalt) == (user ^. userPassword)
+
     validateLogin :: CheckFieldT IO LoginError LoginUser User
     validateLogin = proc loginUser -> do
       maybeUser <- liftEffect (selectUserByUsername conn) -< loginUsername loginUser
@@ -119,10 +133,10 @@ data RegistrationError
   | PasswordTooShort
   deriving (Eq, Show)
 
-showLoginError :: LoginError -> T.Text
-showLoginError EmailExists = "That email is already taken"
-showLoginError UsernameExists = "That username is already taken"
-showLoginError PasswordTooShort = "Your password is too short"
+showRegistrationError :: RegistrationError -> T.Text
+showRegistrationError EmailExists = "That email is already taken"
+showRegistrationError UsernameExists = "That username is already taken"
+showRegistrationError PasswordTooShort = "Your password is too short"
 
 data LoginUser = LoginUser { loginUsername :: T.Text, loginPassword :: T.Text }
 instance FromForm LoginUser where
@@ -131,29 +145,27 @@ instance FromForm LoginUser where
       parseUnique "username" form <*>
       parseUnique "password" form
 
-{-
-instance Serialize DisplayUser where
-  put user = do
-    B.put (user ^. userId)
-    B.put $ encodeUtf8 (user ^. userName)
-
-  get = User <$> B.get <*> (decodeUtf8 <$> B.get) <*> pure () <*> pure () <*> pure ()
--}
-
-type Post = Post' Int T.Text UTCTime T.Text T.Text
-instance ToJSON Post where
+data DisplayPost
+  = DisplayPost
+  { displayPostId     :: Int
+  , displayPostAuthor :: T.Text
+  , displayPostDate   :: UTCTime
+  , displayPostTitle  :: T.Text
+  , displayPostBody   :: T.Text
+  }
+instance ToJSON DisplayPost where
   toJSON post
     = object
-      [ "id" .= (post ^. postId)
-      , "author" .= (post ^. postAuthor)
-      , "created" .= (floor $ utcTimeToPOSIXSeconds (post ^. postCreated) :: Int)
-      , "title" .= (post ^. postTitle)
-      , "body" .= (post ^. postBody)
+      [ "id" .= displayPostId post
+      , "author" .= displayPostAuthor post
+      , "created" .= (floor $ utcTimeToPOSIXSeconds (displayPostDate post) :: Int)
+      , "title" .= displayPostTitle post
+      , "body" .= displayPostBody post
       ]
 
-instance FromJSON Post where
+instance FromJSON DisplayPost where
   parseJSON (Object v)
-    = Post <$>
+    = DisplayPost <$>
       v .: "id" <*>
       v .: "author" <*>
       v .: "created" <*>
@@ -253,7 +265,6 @@ server key conn
     validateRegistration = proc user -> do
       expectM "username" (\u -> not <$> usernameExists conn (u ^. userName)) UsernameExists -< user
       expectM "email" (\u -> not <$> emailExists conn (u ^. userEmail)) EmailExists -< user
-      expectM "email" (\u -> not <$> emailExists conn (u ^. userEmail)) EmailExists -< user
       expect "password" (\u -> T.length (u ^. userPassword) >= 8) PasswordTooShort -< user
       returnA -< user
     -}
@@ -263,8 +274,6 @@ server key conn
       salt <- getEntropy 100
       insertUser conn (user ^. userName) (user ^. userEmail) (genHash (user ^. userPassword) salt) salt
 
-    passwordMatches password user
-      = genHash password (user ^. userSalt) == (user ^. userPassword)
 
     userPosts :: Text -> Handler [Post]
     userPosts username = do

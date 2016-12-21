@@ -1,5 +1,7 @@
 resolver: lts-7.13
-extra-deps: [http-api-data-0.3.3]
+extra-deps:
+  - http-api-data-0.3.3
+  - scotty-cookie-0.1.0.3
 packages:
   - location: .
   - location:

@@ -20,6 +20,7 @@ library
                      , Humblr.Database.Queries
                      , Humblr.Html
                      , Humblr.Endpoints
+                     , Humblr.Endpoints.Compose
                      , Humblr.Endpoints.Home
                      , Humblr.Endpoints.Login
                      , Humblr.Endpoints.Register

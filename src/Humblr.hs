@@ -26,7 +26,6 @@ import qualified Data.Serialize             as B
 import qualified Data.Text                  as T
 import           Data.Text.Encoding         (decodeUtf8, encodeUtf8)
 import qualified Data.Text.Lazy             as L
-import           Data.Time                  (UTCTime)
 import           Data.Time.Clock.POSIX      (utcTimeToPOSIXSeconds)
 import           Database.PostgreSQL.Simple (Connection)
 import           GHC.Generics
@@ -41,7 +40,8 @@ import           Humblr.Endpoints
 
 humblr :: Key -> Connection -> ScottyM ()
 humblr key conn = do
-  home key
+  compose
+  home key conn
   login key conn
   register key conn
 
@@ -56,7 +56,6 @@ type PostAPI
     AuthProtect "cookie-auth" :> ReqBody '[JSON] CreatePost :> Patch '[JSON] Text
 
 type HumblrAPI
-  = "register" :> ReqBody '[JSON] RegisterUser :> PostCreated '[JSON] () :<|>
     "user" :> Capture "user" Text :> "posts" :> Get '[JSON] [Post] :<|>
     "me" :> AuthProtect "cookie-auth" :> Get '[JSON] UserInfo :<|>
     "my" :> "posts" :> AuthProtect "cookie-auth" :> MyPostsAPI :<|>
@@ -66,40 +65,10 @@ type HumblrAPI
     Get '[HTML] (Html ())
 -}
 
-
 newtype Token = Token { token :: T.Text }
   deriving (Eq, Generic, Show)
 
 instance ToJSON Token where
-
-
-
-data DisplayPost
-  = DisplayPost
-  { displayPostId     :: Int
-  , displayPostAuthor :: T.Text
-  , displayPostDate   :: UTCTime
-  , displayPostTitle  :: T.Text
-  , displayPostBody   :: T.Text
-  }
-instance ToJSON DisplayPost where
-  toJSON post
-    = object
-      [ "id" .= displayPostId post
-      , "author" .= displayPostAuthor post
-      , "created" .= (floor $ utcTimeToPOSIXSeconds (displayPostDate post) :: Int)
-      , "title" .= displayPostTitle post
-      , "body" .= displayPostBody post
-      ]
-
-instance FromJSON DisplayPost where
-  parseJSON (Object v)
-    = DisplayPost <$>
-      v .: "id" <*>
-      v .: "author" <*>
-      v .: "created" <*>
-      v .: "title" <*>
-      v .: "body"
 
 {-
 runValidation :: ToJSON e => ServantErr -> a -> CheckFieldT IO e a b -> (b -> Handler c) -> Handler c

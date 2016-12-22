@@ -16,30 +16,40 @@ cabal-version:       >=1.10
 library
   hs-source-dirs:      src
   exposed-modules:     Humblr
-                     , Humblr.Check
-                     , Humblr.Check.Field
                      , Humblr.Database.Models
                      , Humblr.Database.Queries
+                     , Humblr.Html
+                     , Humblr.Endpoints
+                     , Humblr.Endpoints.Compose
+                     , Humblr.Endpoints.Home
+                     , Humblr.Endpoints.Login
+                     , Humblr.Endpoints.Posts
+                     , Humblr.Endpoints.Register
+                     , Humblr.Util
   build-depends:       base >= 4.7 && < 5
                      , aeson
                      , aeson-pretty
                      , bytestring
                      , cereal
+                     , check
                      , clientsession
                      , containers
                      , contravariant
                      , cryptonite
                      , entropy
+                     , http-api-data
+                     , http-types
                      , lens
+                     , lucid
                      , mtl
                      , opaleye
                      , postgresql-simple
                      , product-profunctors
                      , profunctors
                      , safe
+                     , scotty
+                     , scotty-cookie
                      , semigroups
-                     , servant
-                     , servant-server
                      , text
                      , time
                      , transformers
@@ -54,6 +64,7 @@ executable humblr
                      , clientsession
                      , humblr
                      , postgresql-simple
+                     , scotty-tls
                      , warp
                      , warp-tls
   default-language:    Haskell2010

@@ -1,7 +1,8 @@
 {-# LANGUAGE Arrows #-}
 
 module Humblr.Database.Queries
-  ( insertUser
+  ( PostWithAuthor
+  , insertUser
   , insertPost
 
   , selectPosts
@@ -43,11 +44,14 @@ userQuery = queryTable userTable
 selectUsers :: Connection -> IO [User]
 selectUsers conn = runQuery conn userQuery
 
-selectUserById :: Connection -> Int -> IO (Maybe User)
-selectUserById conn uid = fmap headMay $ runQuery conn $ proc () -> do
+selectUserByIdQuery :: Int -> Query UserColumnR
+selectUserByIdQuery uid = proc () -> do
   userRow <- userQuery -< ()
   restrict -< userRow ^. userId .== pgInt4 uid
   returnA -< userRow
+
+selectUserById :: Connection -> Int -> IO (Maybe User)
+selectUserById conn = fmap headMay . runQuery conn . selectUserByIdQuery
 
 selectUserByUsername :: Connection -> Text -> IO (Maybe User)
 selectUserByUsername conn = fmap headMay . selectUserByUsernameQuery conn
@@ -97,14 +101,16 @@ postsWithAuthorsQuery = proc () -> do
 selectPostsWithAuthors :: Connection -> IO [PostWithAuthor]
 selectPostsWithAuthors conn = runQuery conn postsWithAuthorsQuery
 
-postsForUserQuery :: Int -> Query PostColumnR
+postsForUserQuery :: Int -> Query PostWithAuthorColumn
 postsForUserQuery uid = proc () -> do
+  userRow <- selectUserByIdQuery uid -< ()
   postRow <- postQuery -< ()
   restrict -< pgInt4 uid .== postRow ^. postAuthor
-  returnA -< postRow
+  returnA -< (postRow & postAuthor .~ (userRow ^. userName))
 
-selectPostsForUser :: Connection -> Int -> IO [Post]
-selectPostsForUser conn uid = runQuery conn $ postsForUserQuery uid
+selectPostsForUser :: Connection -> Int -> IO [PostWithAuthor]
+selectPostsForUser conn uid = runQuery conn . orderBy (desc (^. postCreated)) $ postsForUserQuery uid
+
 
 postByIdQuery :: Int -> Query PostWithAuthorColumn
 postByIdQuery pid = proc () -> do

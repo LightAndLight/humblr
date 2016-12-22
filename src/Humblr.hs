@@ -43,6 +43,7 @@ humblr key conn = do
   compose
   home key conn
   login key conn
+  posts key conn
   register key conn
 
 {-

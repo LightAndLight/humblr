@@ -23,6 +23,7 @@ library
                      , Humblr.Endpoints.Compose
                      , Humblr.Endpoints.Home
                      , Humblr.Endpoints.Login
+                     , Humblr.Endpoints.Posts
                      , Humblr.Endpoints.Register
                      , Humblr.Util
   build-depends:       base >= 4.7 && < 5

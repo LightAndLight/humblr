@@ -109,7 +109,8 @@ postsForUserQuery uid = proc () -> do
   returnA -< (postRow & postAuthor .~ (userRow ^. userName))
 
 selectPostsForUser :: Connection -> Int -> IO [PostWithAuthor]
-selectPostsForUser conn uid = runQuery conn $ postsForUserQuery uid
+selectPostsForUser conn uid = runQuery conn . orderBy (desc (^. postCreated)) $ postsForUserQuery uid
+
 
 postByIdQuery :: Int -> Query PostWithAuthorColumn
 postByIdQuery pid = proc () -> do

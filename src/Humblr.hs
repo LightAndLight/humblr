@@ -1,10 +1,5 @@
-{-# LANGUAGE Arrows                     #-}
-{-# LANGUAGE DataKinds                  #-}
-{-# LANGUAGE DeriveGeneric              #-}
-{-# LANGUAGE GeneralizedNewtypeDeriving #-}
-{-# LANGUAGE OverloadedStrings          #-}
-{-# LANGUAGE TypeFamilies               #-}
-{-# LANGUAGE TypeOperators              #-}
+{-# LANGUAGE DeriveGeneric     #-}
+{-# LANGUAGE OverloadedStrings #-}
 
 module Humblr (humblr) where
 
@@ -13,7 +8,6 @@ import           Control.Lens               hiding ((.=))
 import           Control.Monad.Except
 import           Control.Monad.IO.Class     (liftIO)
 import           Control.Monad.Reader
-import           Crypto.KDF.Scrypt
 import           Data.Aeson                 (FromJSON (..), ToJSON (..),
                                              Value (..), object, (.:), (.=))
 import           Data.Aeson.Encode.Pretty   (encodePretty)
@@ -37,58 +31,19 @@ import           Data.Time.Clock.POSIX      (utcTimeToPOSIXSeconds)
 import           Database.PostgreSQL.Simple (Connection)
 import           GHC.Generics
 import           Lucid
-import           Network.HTTP.Types.Status
 import           Network.Wai                (Application, Request,
                                              requestHeaders)
 import           Opaleye                    (runQuery)
-import           System.Entropy
-import           Web.ClientSession
-import           Web.FormUrlEncoded
+import           Web.ClientSession          (Key)
 import           Web.Scotty
-import           Web.Scotty.Cookie
 
-import           Humblr.Database.Models
-import           Humblr.Database.Queries
-import qualified Humblr.Html                as H
-
-eitherToMaybe :: Either e a -> Maybe a
-eitherToMaybe (Left _) = Nothing
-eitherToMaybe (Right a) = Just a
+import           Humblr.Endpoints
 
 humblr :: Key -> Connection -> ScottyM ()
 humblr key conn = do
-  get "/" $ do
-    cookie <- getCookie "auth"
-    let maybeUser = encodeUtf8 <$> cookie >>= decrypt key >>= eitherToMaybe . B.decode
-    html . renderText $ H.homepage maybeUser M.empty
-  post "/login" $ do
-    payload <- body
-    case urlDecodeForm payload >>= fromForm of
-      Left err -> raise $ L.fromStrict err
-      Right loginUser -> do
-        res <- liftIO $ checkT validateLogin loginUser
-        case res of
-          Right user -> do
-            t <- liftIO . encryptIO key $
-              B.encode $ H.DisplayUser (user ^. userId) (user ^. userName)
-            status status303
-            setHeader "Location" "/"
-            setSimpleCookie "auth" $ decodeUtf8 t
-          Left errs -> html . renderText . H.homepage Nothing $ fmap (showLoginError . N.head) (getFieldErrors errs)
-  where
-    passwordMatches password user
-      = genHash password (user ^. userSalt) == (user ^. userPassword)
-
-    validateLogin :: CheckFieldT IO LoginError LoginUser User
-    validateLogin = proc loginUser -> do
-      maybeUser <- liftEffect (selectUserByUsername conn) -< loginUsername loginUser
-      expect "username" isJust UserDoesNotExist -< maybeUser
-      case maybeUser of
-        Just user -> do
-          whenFalse "password" PasswordIncorrect -< passwordMatches (loginPassword loginUser) user
-          returnA -< user
-        Nothing -> failure -< ()
-
+  home key
+  login key conn
+  register key conn
 
 {-
 type MyPostsAPI
@@ -111,39 +66,13 @@ type HumblrAPI
     Get '[HTML] (Html ())
 -}
 
-data LoginError
-  = UserDoesNotExist
-  | PasswordIncorrect
-
-showLoginError :: LoginError -> T.Text
-showLoginError UserDoesNotExist = "Incorrect username"
-showLoginError PasswordIncorrect = "Incorrect password"
-
 
 newtype Token = Token { token :: T.Text }
   deriving (Eq, Generic, Show)
 
 instance ToJSON Token where
 
-type User = User' Int T.Text T.Text ByteString ByteString
 
-data RegistrationError
-  = EmailExists
-  | UsernameExists
-  | PasswordTooShort
-  deriving (Eq, Show)
-
-showRegistrationError :: RegistrationError -> T.Text
-showRegistrationError EmailExists = "That email is already taken"
-showRegistrationError UsernameExists = "That username is already taken"
-showRegistrationError PasswordTooShort = "Your password is too short"
-
-data LoginUser = LoginUser { loginUsername :: T.Text, loginPassword :: T.Text }
-instance FromForm LoginUser where
-  fromForm form
-    = LoginUser <$>
-      parseUnique "username" form <*>
-      parseUnique "password" form
 
 data DisplayPost
   = DisplayPost
@@ -181,8 +110,6 @@ runValidation errCode input validator ifValid = do
     Left err -> throwError errCode { errBody = encodePretty (M.singleton ("errors" :: Text) err) }
 -}
 
-genHash :: T.Text -> ByteString -> ByteString
-genHash password = generate (Parameters (2^14) 8 1 100) (encodeUtf8 password)
 
 {-
 authHandler :: Key -> AuthHandler Request DisplayUser
@@ -261,18 +188,8 @@ server key conn
     homepage
   where
     {-
-    validateRegistration :: CheckFieldT IO RegistrationError RegisterUser RegisterUser
-    validateRegistration = proc user -> do
-      expectM "username" (\u -> not <$> usernameExists conn (u ^. userName)) UsernameExists -< user
-      expectM "email" (\u -> not <$> emailExists conn (u ^. userEmail)) EmailExists -< user
-      expect "password" (\u -> T.length (u ^. userPassword) >= 8) PasswordTooShort -< user
-      returnA -< user
     -}
 
-    register :: RegisterUser -> Handler ()
-    register user = void . liftIO $ do
-      salt <- getEntropy 100
-      insertUser conn (user ^. userName) (user ^. userEmail) (genHash (user ^. userPassword) salt) salt
 
 
     userPosts :: Text -> Handler [Post]

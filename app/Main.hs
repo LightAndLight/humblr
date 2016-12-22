@@ -14,4 +14,4 @@ main :: IO ()
 main = do
   conn <- connectPostgreSQL "host='/tmp' dbname='humblrdb'"
   (_,key) <- randomKey
-  scottyTLS 3000 ".tls/certificate.pem" ".tls/key.pem" $ humblr key conn
+  scottyTLS 3000 ".tls/key.pem" ".tls/certificate.pem" $ humblr key conn

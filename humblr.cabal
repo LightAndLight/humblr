@@ -19,6 +19,11 @@ library
                      , Humblr.Database.Models
                      , Humblr.Database.Queries
                      , Humblr.Html
+                     , Humblr.Endpoints
+                     , Humblr.Endpoints.Home
+                     , Humblr.Endpoints.Login
+                     , Humblr.Endpoints.Register
+                     , Humblr.Util
   build-depends:       base >= 4.7 && < 5
                      , aeson
                      , aeson-pretty

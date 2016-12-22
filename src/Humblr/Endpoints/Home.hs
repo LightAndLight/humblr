@@ -41,5 +41,6 @@ homePage userData errs = page $ PageConfig "Home" body []
           loginForm errs
         Just (user,posts) -> do
           h1_ . toHtml $ welcome <> ", " <> displayUsername user
-          with a_ [href_ "/compose"] $ h2_ "Write a post"
-          traverse_ postTemplate posts
+          with section_ [id_ "posts"] $ do
+            with a_ [href_ "/compose"] $ h2_ "Write a post"
+            traverse_ postTemplate posts

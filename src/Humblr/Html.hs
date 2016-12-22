@@ -33,22 +33,37 @@ script name = with (script_ "") [type_ "text/javascript", src_ name]
 page :: PageConfig -> Html ()
 page config
   = doctypehtml_ $ do
-      head_ . title_ . toHtml $ pageTitle config <> " - Humblr"
+      head_ $ do
+        title_ . toHtml $ pageTitle config <> " - Humblr"
+        link_ [rel_ "stylesheet", href_ "/style/style.css"]
+        link_ [rel_ "stylesheet", href_ "https://fonts.googleapis.com/css?family=Assistant:300,700"]
       body_ $ pageBody config
       traverse_ script $ pageScripts config
       with (script_ "") [type_ "text/javascript", src_ "/scripts/date.js"]
 
 loginForm :: Map Text Text -> Html ()
 loginForm errs = do
-  with form_ [method_ "post", action_ "/login"] $ do
-    with label_ [for_ "username"] "Username: "
-    input_ [type_ "text", name_ "username", id_ "username"]
+  with form_ [id_ "login", method_ "post", action_ "/login"] $ do
+    input_
+      [ type_ "text"
+      , name_ "username"
+      , id_ "username"
+      , placeholder_ "Username"
+      , onfocus_ "this.placeholder = ''"
+      , onblur_ "this.placeholder = 'Username'"
+      ]
     br_ []
     maybe "" (with span_ [class_ "error"] . toHtml) $ M.lookup "username" errs
     br_ []
 
-    with label_ [for_ "password"] "Password: "
-    input_ [type_ "password", name_ "password", id_ "password"]
+    input_
+      [ type_ "password"
+      , name_ "password"
+      , id_ "password"
+      , placeholder_ "Password"
+      , onfocus_ "this.placeholder = ''"
+      , onblur_ "this.placeholder = 'Password'"
+      ]
     maybe "" (with span_ [class_ "error"] . toHtml) $ M.lookup "password" errs
     br_ []
     br_ []
@@ -58,7 +73,7 @@ loginForm errs = do
 postTemplate :: PostWithAuthor -> Html ()
 postTemplate post
   = with section_ [class_ "post"] $ do
-      h3_ $ toHtml (post ^. postTitle)
+      h2_ $ toHtml (post ^. postTitle)
       p_ $ toHtml (post ^. postAuthor)
       with p_ [class_ "date"] . toHtml $ formatTime defaultTimeLocale "%s" (post ^. postCreated)
       with div_ [class_ "post-content"] $ toHtml (post ^. postBody)

@@ -1,0 +1,62 @@
+
+html
+{
+  font-family : "Assistant", sans-serif;
+  color       : #282828;
+  border-left : solid 15px #eeeeee;
+  border-top  : solid 3px #eeeeee;
+}
+
+section#posts,
+form#login
+{
+  width       : 61.80339%;
+  margin-left : 23.60679%;
+}
+
+h1
+{
+  font-size   : 5em;
+  margin-left : 14.5898%;
+}
+
+section.post
+{
+  border-bottom  : solid 1px #eeeeee;
+  padding-bottom : 0.61803em;
+}
+
+input
+{
+  border        : solid 1px #d2d2d2;
+  border-radius : 0.1em 0.1em 0.1em 0.1em;
+  font-family   : "Assistant", sans-serif;
+  font-weight   : 300;
+  font-size     : 3em;
+  padding       : 0.25em 0.25em 0.25em 0.25em;
+  text-align    : center;
+  width         : 70.82039%;
+}
+
+input[type='submit']
+{
+  font-size        : 2.25em;
+  padding-left     : 1em;
+  padding-right    : 1em;
+  background-color : #eeeeee;
+  width            : 38.1966%;
+}
+
+input[type='submit']:hover
+{
+  background-color : #dcdcdc;
+}
+
+input:focus,
+input:hover
+{
+  border-color : #aaaaaa;
+}
+
+
+/* Generated with Clay, http://fvisser.nl/clay */

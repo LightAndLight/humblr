@@ -3,6 +3,7 @@
 module Humblr.Html where
 
 import           Control.Lens
+import           Data.Foldable           (traverse_)
 import           Data.Map                (Map)
 import qualified Data.Map                as M (lookup)
 import           Data.Monoid
@@ -16,7 +17,7 @@ import           Lucid
 import           Humblr.Database.Models
 import           Humblr.Database.Queries (PostWithAuthor)
 
-data PageConfig = PageConfig { pageTitle :: Text, pageBody :: Html () }
+data PageConfig = PageConfig { pageTitle :: Text, pageBody :: Html (), pageScripts :: [Text] }
 
 data DisplayUser = DisplayUser { displayUserId :: Int, displayUsername :: Text }
 instance Serialize DisplayUser where
@@ -26,11 +27,16 @@ instance Serialize DisplayUser where
 
   get = DisplayUser <$> B.get <*> (decodeUtf8 <$> B.get)
 
+script :: Text -> Html ()
+script name = with (script_ "") [type_ "text/javascript", src_ name]
+
 page :: PageConfig -> Html ()
 page config
   = doctypehtml_ $ do
       head_ . title_ . toHtml $ pageTitle config <> " - Humblr"
       body_ $ pageBody config
+      traverse_ script $ pageScripts config
+      with (script_ "") [type_ "text/javascript", src_ "/scripts/date.js"]
 
 loginForm :: Map Text Text -> Html ()
 loginForm errs = do

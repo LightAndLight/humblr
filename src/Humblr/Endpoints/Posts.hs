@@ -50,4 +50,4 @@ posts key conn = do
     maybe (status status404) (html . renderText . postPage) maybePost
 
 postPage :: PostWithAuthor -> Html ()
-postPage post = page $ PageConfig (post ^. postTitle) (postTemplate post)
+postPage post = page $ PageConfig (post ^. postTitle) (postTemplate post) []

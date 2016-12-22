@@ -79,7 +79,7 @@ login key conn = do
         Nothing -> failure -< ()
 
 loginPage :: Map T.Text T.Text -> Html ()
-loginPage errs = page (PageConfig "Login" body)
+loginPage errs = page $ PageConfig "Login" body []
   where
     body = do
       h1_ "Log In"

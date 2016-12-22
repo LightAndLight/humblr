@@ -31,7 +31,7 @@ home key conn
       html . renderText $ homePage pageData M.empty
 
 homePage :: Maybe (DisplayUser, [PostWithAuthor]) -> M.Map T.Text T.Text -> Html ()
-homePage userData errs = page (PageConfig "Home" body)
+homePage userData errs = page $ PageConfig "Home" body []
   where
     body = do
       let welcome = "Welcome to Humblr"

@@ -11,7 +11,7 @@ compose :: ScottyM ()
 compose = get "/compose" . html $ renderText composePage
 
 composePage :: Html ()
-composePage = page $ PageConfig "Compose" body
+composePage = page $ PageConfig "Compose" body []
   where
     body = do
       with form_ [action_ "/posts", method_ "post"] $ do

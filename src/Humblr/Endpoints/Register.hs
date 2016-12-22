@@ -85,7 +85,7 @@ register key conn = do
       returnA -< user
 
 registerPage :: M.Map T.Text T.Text -> Html ()
-registerPage errs = page (PageConfig "Register" body)
+registerPage errs = page $ PageConfig "Register" body []
   where
     body = do
       h1_ "Sign me up"
@@ -119,7 +119,7 @@ registerPage errs = page (PageConfig "Register" body)
         input_ [type_ "submit", value_ "Register"]
 
 successPage :: Html ()
-successPage = page (PageConfig "Register" body)
+successPage = page $ PageConfig "Register" body []
   where
     body = do
       h1_ "Success!"

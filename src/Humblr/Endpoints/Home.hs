@@ -31,16 +31,15 @@ home key conn
       html . renderText $ homePage pageData M.empty
 
 homePage :: Maybe (DisplayUser, [PostWithAuthor]) -> M.Map T.Text T.Text -> Html ()
-homePage userData errs = page $ PageConfig "Home" body []
+homePage userData errs = page $ PageConfig "Home" header body []
   where
+    welcome = "Welcome to Humblr"
+    header = h1_ . toHtml $ welcome <> maybe "" (mappend ", " . displayUsername . fst) userData
     body = do
-      let welcome = "Welcome to Humblr"
       case userData of
         Nothing -> do
           h1_ $ toHtml welcome
           loginForm errs
         Just (user,posts) -> do
-          h1_ . toHtml $ welcome <> ", " <> displayUsername user
-          with section_ [id_ "posts"] $ do
-            with a_ [href_ "/compose"] $ h2_ "Write a post"
-            traverse_ postTemplate posts
+          with a_ [href_ "/compose"] $ h2_ "Write a post"
+          traverse_ postTemplate posts

@@ -85,10 +85,10 @@ register key conn = do
       returnA -< user
 
 registerPage :: M.Map T.Text T.Text -> Html ()
-registerPage errs = page $ PageConfig "Register" body []
+registerPage errs = page $ PageConfig "Register" header body []
   where
+    header = h1_ "Sign me up"
     body = do
-      h1_ "Sign me up"
       with form_ [method_ "post", action_ "/register"] $ do
         with label_ [for_ "username"] "Username: "
         input_ [type_ "text", name_ "username", id_ "username"]
@@ -119,10 +119,10 @@ registerPage errs = page $ PageConfig "Register" body []
         input_ [type_ "submit", value_ "Register"]
 
 successPage :: Html ()
-successPage = page $ PageConfig "Register" body []
+successPage = page $ PageConfig "Register" header body []
   where
+    header = h1_ "Success!"
     body = do
-      h1_ "Success!"
       p_ $ do
         "Log in "
         with a_ [href_ "/login"] "here"

@@ -27,31 +27,38 @@ stylesheet = do
     color $ rgb 40 40 40
     borderLeft solid (px 15.0) $ rgb 238 238 238
     borderTop solid (px 3.0) $ rgb 238 238 238
-  section # "#posts" <> form # "#login" ? do
+  section # "#content" ? do
     width $ pct (100 / phi)
     marginLeft $ pct leftMargin
   h1 ? do
     fontSize $ em 5.0
+  h1 # "#post-title" ? do
+    marginBottom $ px 0
+  header ? do
     marginLeft $ pct rightMargin
+    marginBottom $ em phi
   section # ".post" ? do
     borderBottom solid (px 1.0) $ rgb 238 238 238
     paddingBottom $ em (1 / phi)
-  input ? do
+  input <> textarea ? do
     border solid (px 1.0) $ rgb 210 210 210
     borderRadius (em 0.1) (em 0.1) (em 0.1) (em 0.1)
     fontFamily ["Assistant"] [sansSerif]
     fontWeight $ weight 300
-    fontSize $ em 3.0
-    padding (em 0.25) (em 0.25) (em 0.25) (em 0.25)
-    textAlign center
     width $ pct (bodyWidth + rightMargin / phi)
-    ("type" @= "submit") & do
-      fontSize $ em 2.25
-      paddingLeft (em 1.0)
-      paddingRight (em 1.0)
-      backgroundColor $ rgb 238 238 238
-      hover & backgroundColor (rgb 220 220 220)
-      width $ pct (bodyWidth - leftMargin)
+  textarea ? do
+    fontSize $ em 1.0
+  input ? do
+    padding (em 0.25) (em 0.25) (em 0.25) (em 0.25)
+    fontSize $ em 3.0
+    textAlign center
+  input # ("type" @= "submit") ? do
+    fontSize $ em 2.25
+    paddingLeft (em 1.0)
+    paddingRight (em 1.0)
+    backgroundColor $ rgb 238 238 238
+    hover & backgroundColor (rgb 220 220 220)
+    width $ pct (bodyWidth - leftMargin)
   input # focus <> input # hover ? borderColor (rgb 170 170 170)
 
 main = L.writeFile "style.css" $ render stylesheet

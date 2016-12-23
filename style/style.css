@@ -7,8 +7,7 @@ html
   border-top  : solid 3px #eeeeee;
 }
 
-section#posts,
-form#login
+section#content
 {
   width       : 61.80339%;
   margin-left : 23.60679%;
@@ -16,8 +15,18 @@ form#login
 
 h1
 {
-  font-size   : 5em;
-  margin-left : 14.5898%;
+  font-size : 5em;
+}
+
+h1#post-title
+{
+  margin-bottom : 0px;
+}
+
+header
+{
+  margin-left   : 14.5898%;
+  margin-bottom : 1.61803em;
 }
 
 section.post
@@ -26,16 +35,26 @@ section.post
   padding-bottom : 0.61803em;
 }
 
-input
+input,
+textarea
 {
   border        : solid 1px #d2d2d2;
   border-radius : 0.1em 0.1em 0.1em 0.1em;
   font-family   : "Assistant", sans-serif;
   font-weight   : 300;
-  font-size     : 3em;
-  padding       : 0.25em 0.25em 0.25em 0.25em;
-  text-align    : center;
   width         : 70.82039%;
+}
+
+textarea
+{
+  font-size : 1em;
+}
+
+input
+{
+  padding    : 0.25em 0.25em 0.25em 0.25em;
+  font-size  : 3em;
+  text-align : center;
 }
 
 input[type='submit']

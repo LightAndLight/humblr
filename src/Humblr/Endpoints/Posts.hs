@@ -7,6 +7,7 @@ import           Control.Monad.IO.Class
 import           Data.Monoid
 import           Data.Text
 import qualified Data.Text.Lazy             as L
+import           Data.Time.Format
 import           Database.PostgreSQL.Simple (Connection)
 import           Lucid
 import           Network.HTTP.Types.Status
@@ -50,4 +51,11 @@ posts key conn = do
     maybe (status status404) (html . renderText . postPage) maybePost
 
 postPage :: PostWithAuthor -> Html ()
-postPage post = page $ PageConfig (post ^. postTitle) (postTemplate post) []
+postPage post = page $ PageConfig (post ^. postTitle) header body []
+  where
+    header = do
+      with h1_ [id_ "post-title"]$ toHtml (post ^. postTitle)
+      span_ . toHtml $ (post ^. postAuthor) <> " — "
+      with span_ [class_ "date"] . toHtml $ formatTime defaultTimeLocale "%s" (post ^. postCreated)
+    body = do
+      with div_ [class_ "post-content"] $ toHtml (post ^. postBody)

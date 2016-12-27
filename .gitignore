@@ -2,3 +2,4 @@
 .pgsql
 logfile
 dist/index.js
+style/*.css

@@ -16,10 +16,17 @@ composePage = page $ PageConfig "Compose" header body []
     header = h1_ "What are you thinking?"
     body = do
       with form_ [id_ "compose", action_ "/posts", method_ "post"] $ do
-        input_ [type_ "text", name_ "title", id_ "title", placeholder_ "Title"]
+        input_
+          [ type_ "text"
+          , name_ "title"
+          , id_ "title"
+          , placeholder_ "Title"
+          , onfocus_ "this.placeholder = ''"
+          , onblur_ "this.placeholder = 'Title'"
+          ]
         br_ []
 
-        with textarea_ [form_ "compose", name_ "body", id_ "body"] ""
+        with textarea_ [form_ "compose", name_ "body", id_ "body", rows_ "20", cols_ "100"] ""
         br_ []
 
         input_ [type_ "submit", value_ "Submit"]

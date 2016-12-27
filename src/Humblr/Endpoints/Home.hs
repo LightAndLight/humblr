@@ -37,9 +37,7 @@ homePage userData errs = page $ PageConfig "Home" header body []
     header = h1_ . toHtml $ welcome <> maybe "" (mappend ", " . displayUsername . fst) userData
     body = do
       case userData of
-        Nothing -> do
-          h1_ $ toHtml welcome
-          loginForm errs
+        Nothing -> loginForm errs
         Just (user,posts) -> do
           with a_ [href_ "/compose"] $ h2_ "Write a post"
           traverse_ postTemplate posts

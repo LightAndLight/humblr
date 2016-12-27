@@ -75,6 +75,7 @@ postTemplate :: PostWithAuthor -> Html ()
 postTemplate post
   = with section_ [class_ "post"] $ do
       h2_ $ toHtml (post ^. postTitle)
-      span_ . toHtml $ (post ^. postAuthor) <> " — "
-      with span_ [class_ "date"] . toHtml $ formatTime defaultTimeLocale "%s" (post ^. postCreated)
+      p_ $ do
+        toHtml $ (post ^. postAuthor) <> " — "
+        with span_ [class_ "date"] . toHtml $ formatTime defaultTimeLocale "%s" (post ^. postCreated)
       with div_ [class_ "post-content"] $ toHtml (post ^. postBody)

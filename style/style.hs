@@ -42,15 +42,17 @@ stylesheet = do
     paddingBottom $ em (1 / phi)
   input <> textarea ? do
     border solid (px 1.0) $ rgb 210 210 210
-    borderRadius (em 0.1) (em 0.1) (em 0.1) (em 0.1)
     fontFamily ["Assistant"] [sansSerif]
     fontWeight $ weight 300
-    width $ pct (bodyWidth + rightMargin / phi)
   textarea ? do
+    borderRadius (em 0.3) (em 0.3) (em 0.3) (em 0.3)
     fontSize $ em 1.0
+    marginTop $ em 1.0
   input ? do
-    padding (em 0.25) (em 0.25) (em 0.25) (em 0.25)
+    width $ pct (bodyWidth + rightMargin / phi)
+    borderRadius (em 0.1) (em 0.1) (em 0.1) (em 0.1)
     fontSize $ em 3.0
+    padding (em 0.25) (em 0.25) (em 0.25) (em 0.25)
     textAlign center
   input # ("type" @= "submit") ? do
     fontSize $ em 2.25
@@ -59,6 +61,6 @@ stylesheet = do
     backgroundColor $ rgb 238 238 238
     hover & backgroundColor (rgb 220 220 220)
     width $ pct (bodyWidth - leftMargin)
-  input # focus <> input # hover ? borderColor (rgb 170 170 170)
+  input # focus <> input # hover <> textarea # hover ? borderColor (rgb 170 170 170)
 
 main = L.writeFile "style.css" $ render stylesheet

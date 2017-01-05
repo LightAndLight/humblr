@@ -13,6 +13,8 @@ import           Clay
 import           Clay.Selector
 import           Data.Monoid
 import qualified Data.Text.Lazy.IO as L (writeFile)
+import           System.Directory
+import           System.FilePath
 
 phi = 1.618033988749895
 
@@ -63,4 +65,6 @@ stylesheet = do
     width $ pct (bodyWidth - leftMargin)
   input # focus <> input # hover <> textarea # hover ? borderColor (rgb 170 170 170)
 
-main = L.writeFile "style.css" $ render stylesheet
+main = do
+  pwd <- getCurrentDirectory
+  L.writeFile (pwd </> "style" </> "style.css") $ render stylesheet
